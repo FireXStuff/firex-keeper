@@ -3,7 +3,6 @@ steps:
   args: ['clone', 'https://github.com/FireXStuff/firex-keeper.git']
   dir: '$BUILD_ID'
 - name: gcr.io/$PROJECT_ID/firex-alpine-build
-  #args: ['python3', 'build.py', 'all', '--sudo',  '--output_dir', '/home/firex', '--upload_pip_if_tag', '--upload_codecov', '--skip_htmlcov']
   args: ['sh', '-c', 'sudo pip3 install firexbuilder && firex-build all --sudo --output_dir /home/firex --upload_pip_if_tag --upload_codecov --skip_htmlcov']
   dir: '$BUILD_ID/firex-keeper'
   secretEnv: ['TWINE_PASSWORD']
