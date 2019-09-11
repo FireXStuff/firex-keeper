@@ -20,7 +20,7 @@ class TaskDatabaseAggregatorThread(BrokerEventConsumerThread):
     def __init__(self, celery_app, run_metadata: RunMetadata, max_retry_attempts: int = None,
                  receiver_ready_file: str = None):
         super().__init__(celery_app, max_retry_attempts, receiver_ready_file)
-        # TODO: always aggregating events isn't necessary, could clear events once tasks are complete.
+        # TODO: keeping all aggregated events in memory isn't necessary, could clear events once tasks are complete.
         self.event_aggregator = FireXEventAggregator()
         self.run_db_manager = create_db_manager(run_metadata.logs_dir)
         self.run_db_manager.insert_run_metadata(run_metadata)

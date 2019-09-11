@@ -25,6 +25,15 @@ def task_by_uuid(logs_dir, uuid):
     return tasks[0]
 
 
+def task_by_name_and_arg_value(logs_dir, name, arg, value):
+    query = _task_col_eq(TaskColumn.NAME, name) \
+        and _task_col_eq(TaskColumn.BOUND_ARGS, arg)
+    tasks = _query_tasks(logs_dir, _task_col_eq(TaskColumn.UUID, uuid))
+    if not tasks:
+        raise Exception("Found no task with UUID %s" % uuid)
+    return tasks[0]
+
+
 def failed_tasks(logs_dir):
     return _query_tasks(logs_dir, _task_col_eq(TaskColumn.STATE, RunStates.FAILED.value))
 

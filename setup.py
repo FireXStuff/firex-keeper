@@ -20,7 +20,7 @@ setup(name='firex_keeper',
       ],
       entry_points={
           'console_scripts': [
-              'firex_keeper = firex_keeper.keeper_launcher:main',
+              'firex_keeper = firex_keeper.__main__:main',
           ],
           'firex_tracking_service':  ['firex_keeper_launcher = firex_keeper.keeper_launcher:FireXKeeperLauncher', ],
       },)
