@@ -40,7 +40,7 @@ class FireXKeeperTests(unittest.TestCase):
             ])
             self.assertEqual(3, len(all_tasks(logs_dir)))
 
-    def test_query_after_update(self):
+    def test_query_failure_after_update(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
             logs_dir = str(tmpdirname)
             _write_events_to_db(logs_dir, [
@@ -49,7 +49,6 @@ class FireXKeeperTests(unittest.TestCase):
                 {'uuid': '1', 'type': RunStates.FAILED.value},
             ])
 
-            print(all_tasks(logs_dir))
             tasks = failed_tasks(logs_dir)
             self.assertEqual(1, len(tasks))
             self.assertEqual(RunStates.FAILED.value, tasks[0].state)

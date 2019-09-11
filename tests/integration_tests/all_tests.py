@@ -4,6 +4,7 @@ from firexapp.testing.config_base import FlowTestConfiguration, assert_is_good_r
 
 from firex_keeper import task_query
 
+
 @app.task()
 def echo(arg_echo):
     return arg_echo

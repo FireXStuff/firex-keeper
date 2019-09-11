@@ -1,12 +1,9 @@
 from collections import namedtuple
-import logging
 
 from sqlalchemy import Table, Column, Integer, String, MetaData, ForeignKey, Boolean, Float, Text
 from sqlalchemy.types import JSON
 
 from firexapp.events.model import RunMetadataColumn, TaskColumn
-
-logger = logging.getLogger(__name__)
 
 
 UUID_LEN = 37
@@ -52,13 +49,12 @@ COLS_TO_SQLALCHEMY_CONFIG = {
     TaskColumn.TRACEBACK: {'kwargs': {'type_': Text, 'default': None}},
 }
 
-# Note SQL columns must be in same order as FireXTask namedtuple fields. The TaskColumn enum is the
-# authority on column/field order.
-COLUMNS = [Column(tc.value, *COLS_TO_SQLALCHEMY_CONFIG[tc].get('args', []), **COLS_TO_SQLALCHEMY_CONFIG[tc]['kwargs'])
+# Note SQL columns must be in same order as FireXTask namedtuple fields in order to create FireXTasks from query
+# results. The TaskColumn enum is the authority on column/field order.
+COLUMNS = [Column(tc.value,
+                  *COLS_TO_SQLALCHEMY_CONFIG[tc].get('args', []),
+                  **COLS_TO_SQLALCHEMY_CONFIG[tc]['kwargs'])
            for tc in TaskColumn]
 
-firex_tasks = Table(
-    'firex_tasks', metadata,
-    *COLUMNS,
-)
+firex_tasks = Table('firex_tasks', metadata, *COLUMNS)
 
