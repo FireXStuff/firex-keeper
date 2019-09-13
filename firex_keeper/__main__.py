@@ -5,7 +5,7 @@ import os
 from celery.app.base import Celery
 
 from firexapp.broker_manager.broker_factory import RedisManager
-from firexapp.events.model import RunMetadata
+from firexapp.events.model import FireXRunMetadata
 from firex_keeper.keeper_event_consumer import TaskDatabaseAggregatorThread
 from firex_keeper.keeper_helper import get_keeper_dir
 
@@ -30,7 +30,7 @@ def init_keeper():
 
     args = parser.parse_args()
 
-    run_metadata = RunMetadata(args.uid, args.logs_dir, args.chain)
+    run_metadata = FireXRunMetadata(args.uid, args.logs_dir, args.chain, None)
 
     keeper_dir = get_keeper_dir(run_metadata.logs_dir)
     os.makedirs(keeper_dir, exist_ok=True)

@@ -9,11 +9,6 @@ from firexapp.events.model import RunMetadataColumn, TaskColumn
 UUID_LEN = 37
 
 
-RunMetadata = namedtuple('RunMetadata', [RunMetadataColumn.FIREX_ID.value,
-                                         RunMetadataColumn.LOGS_DIR.value,
-                                         RunMetadataColumn.CHAIN.value])
-
-
 metadata = MetaData()
 firex_run_metadata = Table(
     'firex_run_metadata',
@@ -51,10 +46,10 @@ COLS_TO_SQLALCHEMY_CONFIG = {
 
 # Note SQL columns must be in same order as FireXTask namedtuple fields in order to create FireXTasks from query
 # results. The TaskColumn enum is the authority on column/field order.
-COLUMNS = [Column(tc.value,
-                  *COLS_TO_SQLALCHEMY_CONFIG[tc].get('args', []),
-                  **COLS_TO_SQLALCHEMY_CONFIG[tc]['kwargs'])
-           for tc in TaskColumn]
+TASK_COLUMNS = [Column(tc.value,
+                       *COLS_TO_SQLALCHEMY_CONFIG[tc].get('args', []),
+                       **COLS_TO_SQLALCHEMY_CONFIG[tc]['kwargs'])
+                for tc in TaskColumn]
 
-firex_tasks = Table('firex_tasks', metadata, *COLUMNS)
+firex_tasks = Table('firex_tasks', metadata, *TASK_COLUMNS)
 
