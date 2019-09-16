@@ -10,31 +10,31 @@ def _task_col_eq(task_col, val):
     return firex_tasks.c[task_col.value] == val
 
 
-def _query_tasks(logs_dir, query):
+def _query_tasks(logs_dir, query) -> List[FireXTask]:
     return get_db_manager(logs_dir).query_tasks(query)
 
 
-def all_tasks(logs_dir):
+def all_tasks(logs_dir) -> List[FireXTask]:
     return _query_tasks(logs_dir, True)
 
 
-def tasks_by_name(logs_dir, name):
+def tasks_by_name(logs_dir, name) -> List[FireXTask]:
     return _query_tasks(logs_dir, _task_col_eq(TaskColumn.NAME, name))
 
 
-def task_by_uuid(logs_dir, uuid):
+def task_by_uuid(logs_dir, uuid) -> FireXTask:
     tasks = _query_tasks(logs_dir, _task_col_eq(TaskColumn.UUID, uuid))
     if not tasks:
         raise Exception("Found no task with UUID %s" % uuid)
     return tasks[0]
 
 
-def task_by_name_and_arg_pred(logs_dir, name, arg, pred):
+def task_by_name_and_arg_pred(logs_dir, name, arg, pred) -> List[FireXTask]:
     tasks_with_name = tasks_by_name(logs_dir, name)
     return [t for t in tasks_with_name if arg in t.firex_bound_args and pred(t.firex_bound_args[arg])]
 
 
-def task_by_name_and_arg_value(logs_dir, name, arg, value):
+def task_by_name_and_arg_value(logs_dir, name, arg, value) -> List[FireXTask]:
     pred = lambda arg_value: arg_value == value
     return task_by_name_and_arg_pred(logs_dir, name, arg, pred)
 
