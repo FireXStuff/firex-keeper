@@ -106,8 +106,10 @@ def find_task_causing_chain_exception(task: FireXTreeTask):
 
     causing_uuid = get_chain_exception_child_uuid(task)
     causing_child = [c for c in task.children if c.uuid == causing_uuid]
-    assert len(causing_child) == 1, \
-        "Expected %s to have exactly one child with uuid %s, found %d." % (task.uuid, causing_uuid, len(causing_child))
+
+    # Note a chain interrupted exception can be caused by a non-descendant task via stitch_chains.
+    if not causing_child:
+        return task
     causing_child = causing_child[0]
 
     if not is_chain_exception(causing_child):
