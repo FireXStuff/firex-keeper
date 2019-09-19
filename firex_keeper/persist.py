@@ -13,9 +13,9 @@ logger = logging.getLogger(__name__)
 
 def connect_db(db_file):
     create_schema = not os.path.exists(db_file)
-    logger.info("Creating engine for %s" % db_file)
     engine = create_engine('sqlite:///' + db_file)
     if create_schema:
+        logger.info("Creating schema for %s" % db_file)
         metadata.create_all(engine)
     return engine.connect()
 

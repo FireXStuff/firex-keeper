@@ -11,7 +11,7 @@ from firexapp.events.event_aggregator import FireXEventAggregator
 from firexapp.events.model import FireXTask
 
 
-FireXTreeTask = namedtuple('FireXTreeTask', FireXTask._fields + ('children',))
+FireXTreeTask = namedtuple('FireXTreeTask', FireXTask._fields + ('children', 'parent'))
 
 
 def get_keeper_dir(logs_dir):

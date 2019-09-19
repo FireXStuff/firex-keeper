@@ -27,7 +27,9 @@ class FireXKeeperLauncher(TrackingService):
                "--chain", args.chain,
                "--broker_recv_ready_file", self.broker_recv_ready_file,
                ]
-        pid = subprocess.Popen(cmd, close_fds=True).pid
+        pid = subprocess.Popen(cmd,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+                               close_fds=True).pid
 
         try:
             Process(pid).wait(0.1)

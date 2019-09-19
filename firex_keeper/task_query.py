@@ -47,29 +47,35 @@ def revoked_tasks(logs_dir) -> List[FireXTask]:
     return _query_tasks(logs_dir, _task_col_eq(TaskColumn.STATE, RunStates.REVOKED.value))
 
 
-def _index_by_parent_id(tasks_by_uuid):
-    tasks_by_parent_id = {u: [] for u in tasks_by_uuid.keys()}
+def _child_ids_by_parent_id(tasks_by_uuid):
+    child_uuids_by_parent_id = {u: [] for u in tasks_by_uuid.keys()}
 
     for t in tasks_by_uuid.values():
         if t.parent_id is not None:
-            tasks_by_parent_id[t.parent_id].append(t)
+            child_uuids_by_parent_id[t.parent_id].append(t.uuid)
 
-    return tasks_by_parent_id
+    return child_uuids_by_parent_id
 
 
 def _tasks_to_tree(root_uuid, tasks_by_uuid) -> FireXTreeTask:
-    tree_tasks_by_uuid = {u: FireXTreeTask(**{**t._asdict(), 'children': []}) for u, t in tasks_by_uuid.items()}
-    tasks_by_parent_uuid = _index_by_parent_id(tree_tasks_by_uuid)
+    child_ids_by_parent_id = _child_ids_by_parent_id(tasks_by_uuid)
 
-    root_task = tree_tasks_by_uuid[root_uuid]
-    tasks_to_add = [root_task]
+    uuids_to_add = [tasks_by_uuid[root_uuid].uuid]
+    tree_tasks_by_uuid = {}
 
-    while tasks_to_add:
-        cur_task = tasks_to_add.pop()
-        cur_task.children.extend(tasks_by_parent_uuid[cur_task.uuid])
-        tasks_to_add += cur_task.children
+    while uuids_to_add:
+        cur_task_uuid = uuids_to_add.pop()
+        cur_task = tasks_by_uuid[cur_task_uuid]
+        parent_tree_task = tree_tasks_by_uuid.get(cur_task.parent_id, None)
 
-    return root_task
+        cur_tree_task = FireXTreeTask(**{**cur_task._asdict(), 'children': [], 'parent': parent_tree_task})
+        if parent_tree_task:
+            parent_tree_task.children.append(cur_tree_task)
+        tree_tasks_by_uuid[cur_tree_task.uuid] = cur_tree_task
+
+        uuids_to_add += child_ids_by_parent_id[cur_tree_task.uuid]
+
+    return tree_tasks_by_uuid[root_uuid]
 
 
 def task_tree(logs_dir, root_uuid=None):
@@ -93,7 +99,7 @@ def flatten_tree(task_tree: FireXTreeTask) -> List[FireXTreeTask]:
     return flat_tasks
 
 
-def get_descendants(logs_dir, uuid) -> List[FireXTask]:
+def get_descendants(logs_dir, uuid) -> List[FireXTreeTask]:
     subtree = task_tree(logs_dir, root_uuid=uuid)
     return [t for t in flatten_tree(subtree) if t.uuid != uuid]
 
