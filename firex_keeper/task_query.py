@@ -11,7 +11,8 @@ def _task_col_eq(task_col, val):
 
 
 def _query_tasks(logs_dir, query) -> List[FireXTask]:
-    return get_db_manager(logs_dir).query_tasks(query)
+    with get_db_manager(logs_dir) as db_manager:
+        return db_manager.query_tasks(query)
 
 
 def all_tasks(logs_dir) -> List[FireXTask]:
@@ -79,13 +80,13 @@ def _tasks_to_tree(root_uuid, tasks_by_uuid) -> FireXTreeTask:
 
 
 def task_tree(logs_dir, root_uuid=None):
-    db_manager = get_db_manager(logs_dir)
-    if root_uuid is None:
-        root_uuid = db_manager.query_single_run_metadata().root_uuid
+    with get_db_manager(logs_dir) as db_manager:
+        if root_uuid is None:
+            root_uuid = db_manager.query_single_run_metadata().root_uuid
 
-    # TODO: could avoid fetching all tasks by using sqlite recursive query.
-    all_tasks_by_uuid = {t.uuid: t for t in db_manager.query_tasks(True)}
-    return _tasks_to_tree(root_uuid, all_tasks_by_uuid)
+        # TODO: could avoid fetching all tasks by using sqlite recursive query.
+        all_tasks_by_uuid = {t.uuid: t for t in db_manager.query_tasks(True)}
+        return _tasks_to_tree(root_uuid, all_tasks_by_uuid)
 
 
 def flatten_tree(task_tree: FireXTreeTask) -> List[FireXTreeTask]:

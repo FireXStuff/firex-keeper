@@ -25,7 +25,8 @@ class KeepNoopData(FlowTestConfiguration):
         assert tasks[0].state == RunStates.SUCCEEDED.value
 
         firex_id = os.path.basename(logs_dir)
-        run_metadata = get_db_manager(logs_dir).query_run_metadata(firex_id)
+        with get_db_manager(logs_dir) as db_manager:
+            run_metadata = db_manager.query_run_metadata(firex_id)
         assert run_metadata.chain == 'echo'
         assert run_metadata.firex_id == firex_id
         assert run_metadata.logs_dir == logs_dir

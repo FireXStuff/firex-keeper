@@ -1,6 +1,7 @@
 import logging
 import os
 from typing import List
+from contextlib import contextmanager
 
 from sqlalchemy import create_engine
 from sqlalchemy.sql import select
@@ -35,8 +36,13 @@ def create_db_manager(logs_dir):
     return FireXRunDbManager(connect_db(get_db_file_path(logs_dir, new=True)))
 
 
+@contextmanager
 def get_db_manager(logs_dir):
-    return FireXRunDbManager(connect_db(get_db_file_path(logs_dir, new=False)))
+    db_manager = FireXRunDbManager(connect_db(get_db_file_path(logs_dir, new=False)))
+    try:
+        yield db_manager
+    finally:
+        db_manager.close()
 
 
 class FireXRunDbManager:
