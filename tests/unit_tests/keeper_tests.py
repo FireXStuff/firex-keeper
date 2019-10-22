@@ -4,8 +4,7 @@ import tempfile
 from firexkit.result import ChainInterruptedException
 from firexapp.events.model import RunStates, FireXRunMetadata
 from firex_keeper.keeper_event_consumer import TaskDatabaseAggregatorThread
-from firex_keeper.task_query import tasks_by_name, all_tasks, failed_tasks, task_tree, get_descendants, \
-    find_task_causing_chain_exception
+from firex_keeper import task_query
 
 
 def _write_events_to_db(logs_dir, events):
@@ -31,6 +30,7 @@ tree_events = [
     {'uuid': '5', 'name': 'Noop', 'parent_id': '3'},
 ]
 
+
 class FireXKeeperTests(unittest.TestCase):
 
     def test_query_by_name(self):
@@ -42,7 +42,7 @@ class FireXKeeperTests(unittest.TestCase):
                 {'uuid': '3', 'name': 'Other'},
             ])
 
-            tasks = tasks_by_name(logs_dir, 'Noop')
+            tasks = task_query.tasks_by_name(logs_dir, 'Noop')
             self.assertEqual(2, len(tasks))
             self.assertEqual('Noop', tasks[0].name)
 
@@ -54,7 +54,7 @@ class FireXKeeperTests(unittest.TestCase):
                 {'uuid': '2', 'name': 'Other'},
                 {'uuid': '3', 'name': 'Third'},
             ])
-            self.assertEqual(3, len(all_tasks(logs_dir)))
+            self.assertEqual(3, len(task_query.all_tasks(logs_dir)))
 
     def test_query_failure_after_update(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
@@ -65,7 +65,7 @@ class FireXKeeperTests(unittest.TestCase):
                 {'uuid': '1', 'type': RunStates.FAILED.value},
             ])
 
-            tasks = failed_tasks(logs_dir)
+            tasks = task_query.failed_tasks(logs_dir)
             self.assertEqual(1, len(tasks))
             self.assertEqual(RunStates.FAILED.value, tasks[0].state)
 
@@ -74,7 +74,7 @@ class FireXKeeperTests(unittest.TestCase):
             logs_dir = str(tmpdirname)
             _write_events_to_db(logs_dir, tree_events)
 
-            tree = task_tree(logs_dir, root_uuid='3')
+            tree = task_query.task_tree(logs_dir, root_uuid='3')
             child_uuids = {t.uuid for t in tree.children}
             self.assertEqual({'4', '5'}, child_uuids)
 
@@ -83,7 +83,7 @@ class FireXKeeperTests(unittest.TestCase):
             logs_dir = str(tmpdirname)
             _write_events_to_db(logs_dir, tree_events)
 
-            tasks = get_descendants(logs_dir, '3')
+            tasks = task_query.get_descendants(logs_dir, '3')
             child_uuids = {t.uuid for t in tasks}
             self.assertEqual({'4', '5'}, child_uuids)
 
@@ -92,7 +92,31 @@ class FireXKeeperTests(unittest.TestCase):
             logs_dir = str(tmpdirname)
             _write_events_to_db(logs_dir, tree_events)
 
-            tree = task_tree(logs_dir)
-            causing_task = find_task_causing_chain_exception(tree)
+            tree = task_query.task_tree(logs_dir)
+            causing_task = task_query.find_task_causing_chain_exception(tree)
             self.assertEqual('4', causing_task.uuid)
 
+    def test_wait_for_task_exist(self):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            logs_dir = str(tmpdirname)
+            _write_events_to_db(logs_dir, [
+                {'uuid': '1', 'name': 'Noop'},
+                {'uuid': '2', 'name': 'Noop'},
+                {'uuid': '3', 'name': 'Other'},
+            ])
+
+            tasks = task_query.tasks_by_name(logs_dir, 'Noop', wait_for_uuid='3', max_wait=1,
+                                             error_on_wait_exceeded=True)
+            self.assertEqual(2, len(tasks))
+
+    def test_wait_for_task_not_exist(self):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            logs_dir = str(tmpdirname)
+            _write_events_to_db(logs_dir, [
+                {'uuid': '1', 'name': 'Noop'},
+                {'uuid': '2', 'name': 'Noop'},
+                {'uuid': '3', 'name': 'Other'},
+            ])
+
+            self.assertRaises(Exception, task_query.tasks_by_name, logs_dir, 'Noop', wait_for_uuid='some fake uuid',
+                              max_wait=1, error_on_wait_exceeded=True)

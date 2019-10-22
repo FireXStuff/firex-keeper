@@ -2,7 +2,7 @@ from typing import List
 
 from firexapp.events.model import TaskColumn, RunStates, FireXTask, is_chain_exception, get_chain_exception_child_uuid
 from firex_keeper.db_model import firex_tasks
-from firex_keeper.persist import get_db_manager
+from firex_keeper.persist import get_db_manager, WAIT_FOR_CURRENT_UUID
 from firex_keeper.keeper_helper import FireXTreeTask
 
 
@@ -10,21 +10,24 @@ def _task_col_eq(task_col, val):
     return firex_tasks.c[task_col.value] == val
 
 
-def _query_tasks(logs_dir, query) -> List[FireXTask]:
+def _query_tasks(logs_dir, query, wait_before_query=False, **kwargs) -> List[FireXTask]:
+    if wait_before_query:
+        kwargs = {'wait_for_uuid': WAIT_FOR_CURRENT_UUID, **kwargs}
+
     with get_db_manager(logs_dir) as db_manager:
-        return db_manager.query_tasks(query)
+        return db_manager.query_tasks(query, **kwargs)
 
 
-def all_tasks(logs_dir) -> List[FireXTask]:
-    return _query_tasks(logs_dir, True)
+def all_tasks(logs_dir, **kwargs) -> List[FireXTask]:
+    return _query_tasks(logs_dir, True, **kwargs)
 
 
-def tasks_by_name(logs_dir, name) -> List[FireXTask]:
-    return _query_tasks(logs_dir, _task_col_eq(TaskColumn.NAME, name))
+def tasks_by_name(logs_dir, name, **kwargs) -> List[FireXTask]:
+    return _query_tasks(logs_dir, _task_col_eq(TaskColumn.NAME, name), **kwargs)
 
 
-def task_by_uuid(logs_dir, uuid) -> FireXTask:
-    tasks = _query_tasks(logs_dir, _task_col_eq(TaskColumn.UUID, uuid))
+def task_by_uuid(logs_dir, uuid, **kwargs) -> FireXTask:
+    tasks = _query_tasks(logs_dir, _task_col_eq(TaskColumn.UUID, uuid), **kwargs)
     if not tasks:
         raise Exception("Found no task with UUID %s" % uuid)
     return tasks[0]
@@ -40,12 +43,12 @@ def task_by_name_and_arg_value(logs_dir, name, arg, value) -> List[FireXTask]:
     return task_by_name_and_arg_pred(logs_dir, name, arg, pred)
 
 
-def failed_tasks(logs_dir) -> List[FireXTask]:
-    return _query_tasks(logs_dir, _task_col_eq(TaskColumn.STATE, RunStates.FAILED.value))
+def failed_tasks(logs_dir, **kwargs) -> List[FireXTask]:
+    return _query_tasks(logs_dir, _task_col_eq(TaskColumn.STATE, RunStates.FAILED.value), **kwargs)
 
 
-def revoked_tasks(logs_dir) -> List[FireXTask]:
-    return _query_tasks(logs_dir, _task_col_eq(TaskColumn.STATE, RunStates.REVOKED.value))
+def revoked_tasks(logs_dir, **kwargs) -> List[FireXTask]:
+    return _query_tasks(logs_dir, _task_col_eq(TaskColumn.STATE, RunStates.REVOKED.value), **kwargs)
 
 
 def _child_ids_by_parent_id(tasks_by_uuid):
@@ -79,13 +82,16 @@ def _tasks_to_tree(root_uuid, tasks_by_uuid) -> FireXTreeTask:
     return tree_tasks_by_uuid[root_uuid]
 
 
-def task_tree(logs_dir, root_uuid=None):
+def task_tree(logs_dir, root_uuid=None, wait_before_query=False, **kwargs):
     with get_db_manager(logs_dir) as db_manager:
         if root_uuid is None:
             root_uuid = db_manager.query_single_run_metadata().root_uuid
 
+        if wait_before_query:
+            kwargs = {'wait_for_uuid': WAIT_FOR_CURRENT_UUID, **kwargs}
+
         # TODO: could avoid fetching all tasks by using sqlite recursive query.
-        all_tasks_by_uuid = {t.uuid: t for t in db_manager.query_tasks(True)}
+        all_tasks_by_uuid = {t.uuid: t for t in db_manager.query_tasks(True, **kwargs)}
         return _tasks_to_tree(root_uuid, all_tasks_by_uuid)
 
 

@@ -41,3 +41,19 @@ class KeepNoopData(FlowTestConfiguration):
     def assert_expected_return_code(self, ret_value):
         assert_is_good_run(ret_value)
 
+
+@app.task(bind=True)
+def wait_before_query_on_self(self, uid):
+    self_task = task_query.task_by_uuid(uid.logs_dir, self.request.id, wait_before_query=True)
+    assert self_task.uuid == self.request.id
+
+
+class WaitOnSelfQueryTest(FlowTestConfiguration):
+    def initial_firex_options(self) -> list:
+        return ["submit", "--chain", "wait_before_query_on_self"]
+
+    def assert_expected_firex_output(self, cmd_output, cmd_err):
+        pass
+
+    def assert_expected_return_code(self, ret_value):
+        assert_is_good_run(ret_value)
