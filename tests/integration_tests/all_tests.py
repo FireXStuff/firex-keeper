@@ -1,15 +1,13 @@
 import os
 
-from sqlalchemy.sql import select
-
 from firexapp.engine.celery import app
 from firexapp.submit.submit import get_log_dir_from_output
 from firexapp.testing.config_base import FlowTestConfiguration, assert_is_good_run
 from firexapp.events.model import RunStates
+from firexapp.common import wait_until
 
 from firex_keeper import task_query
 from firex_keeper.persist import get_db_manager
-from firex_keeper.db_model import firex_run_metadata
 
 
 @app.task()
@@ -30,7 +28,8 @@ class KeepNoopData(FlowTestConfiguration):
         firex_id = os.path.basename(logs_dir)
         with get_db_manager(logs_dir) as db_manager:
             run_metadata = db_manager.query_run_metadata(firex_id)
-            assert db_manager.is_keeper_complete() is True
+            is_complete = wait_until(db_manager.is_keeper_complete, timeout=5, sleep_for=0.5)
+            assert is_complete is True
 
         assert run_metadata.chain == 'echo'
         assert run_metadata.firex_id == firex_id
