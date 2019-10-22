@@ -17,6 +17,7 @@ firex_run_metadata = Table(
     Column(RunMetadataColumn.LOGS_DIR.value, String(300), nullable=False),
     Column(RunMetadataColumn.CHAIN.value, String(70), nullable=False),
     Column(RunMetadataColumn.ROOT_UUID.value, String(UUID_LEN), nullable=True),
+    Column('keeper_complete', Boolean, default=False),
 )
 
 

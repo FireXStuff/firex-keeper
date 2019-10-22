@@ -45,6 +45,11 @@ def get_db_manager(logs_dir):
         db_manager.close()
 
 
+def _row_to_run_metadata(row):
+    # The first 4 columns from the table make up a FireXRunMetadata.
+    return FireXRunMetadata(*row[:4])
+
+
 class FireXRunDbManager:
 
     def __init__(self, db_conn):
@@ -55,6 +60,9 @@ class FireXRunDbManager:
 
     def _set_root_uuid(self, root_uuid) -> None:
         self.db_conn.execute(firex_run_metadata.update().values(root_uuid=root_uuid))
+
+    def set_keeper_complete(self):
+        self.db_conn.execute(firex_run_metadata.update().values(keeper_complete=True))
 
     def insert_or_update_tasks(self, new_task_data_by_uuid, root_uuid):
         for uuid, new_task_data in new_task_data_by_uuid.items():
@@ -84,14 +92,21 @@ class FireXRunDbManager:
         result = self.db_conn.execute(select([firex_run_metadata]).where(firex_run_metadata.c.firex_id == firex_id))
         if not result:
             raise Exception("Found no run data for %s" % firex_id)
-        return [FireXRunMetadata(*row) for row in result][0]
+        # The first 4 columns from the table make up a FireXRunMetadata.
+        return [_row_to_run_metadata(row) for row in result][0]
+
+    def _query_single_run_metadata_row(self):
+        result = self.db_conn.execute(select([firex_run_metadata]))
+        rows = [r for r in result]
+        if len(rows) != 1:
+            raise Exception("Expected exactly one firex_run_metadata, but found %d" % len(rows))
+        return rows[0]
+
+    def is_keeper_complete(self) -> bool:
+        return self._query_single_run_metadata_row()['keeper_complete']
 
     def query_single_run_metadata(self) -> FireXRunMetadata:
-        result = self.db_conn.execute(select([firex_run_metadata]))
-        metadatas = [FireXRunMetadata(*row) for row in result]
-        if len(metadatas) != 1:
-            raise Exception("Expected exactly one firex_run_metadata, but found %d" % len(metadatas))
-        return metadatas[0]
+        return _row_to_run_metadata(self._query_single_run_metadata_row())
 
     def close(self):
         self.db_conn.close()
