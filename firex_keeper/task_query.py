@@ -6,6 +6,9 @@ from firex_keeper.persist import get_db_manager, WAIT_FOR_CURRENT_UUID
 from firex_keeper.keeper_helper import FireXTreeTask
 
 
+class FireXTaskQueryException(Exception):
+    pass
+
 def _task_col_eq(task_col, val):
     return firex_tasks.c[task_col.value] == val
 
@@ -26,10 +29,17 @@ def tasks_by_name(logs_dir, name, **kwargs) -> List[FireXTask]:
     return _query_tasks(logs_dir, _task_col_eq(TaskColumn.NAME, name), **kwargs)
 
 
+def single_task_by_name(logs_dir, name, **kwargs) -> FireXTask:
+    tasks = _query_tasks(logs_dir, _task_col_eq(TaskColumn.NAME, name), **kwargs)
+    if len(tasks) != 1:
+        raise FireXTaskQueryException("Required exactly one task named '%s', found %s" % (name, len(tasks)))
+    return tasks[0]
+
+
 def task_by_uuid(logs_dir, uuid, **kwargs) -> FireXTask:
     tasks = _query_tasks(logs_dir, _task_col_eq(TaskColumn.UUID, uuid), **kwargs)
     if not tasks:
-        raise Exception("Found no task with UUID %s" % uuid)
+        raise FireXTaskQueryException("Found no task with UUID %s" % uuid)
     return tasks[0]
 
 
