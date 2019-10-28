@@ -129,3 +129,9 @@ def find_task_causing_chain_exception(task: FireXTreeTask):
         return causing_child
 
     return find_task_causing_chain_exception(causing_child)
+
+
+def wait_on_keeper_complete(logs_dir, timeout=15) -> bool:
+    from firexapp.common import wait_until
+    with get_db_manager(logs_dir) as db_manager:
+        return wait_until(db_manager.is_keeper_complete, timeout=timeout, sleep_for=0.5)

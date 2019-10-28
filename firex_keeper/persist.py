@@ -42,8 +42,9 @@ def create_db_manager(logs_dir):
     return FireXRunDbManager(connect_db(get_db_file_path(logs_dir, new=True)))
 
 
-def wait_for_task_exist(query_task_by_uuid_fn, max_wait, wait_for_uuid, error_on_wait_exceeded):
+def wait_before_query(query_task_by_uuid_fn, max_wait, wait_for_uuid, error_on_wait_exceeded):
     start_wait_time = perf_counter()
+    # TODO: could generalize this function to also wait on entire keeper process being complete.
     if wait_for_uuid == WAIT_FOR_CURRENT_UUID:
         wait_for_uuid = current_task.request.id
 
@@ -112,7 +113,7 @@ class FireXRunDbManager:
 
     def query_tasks(self, exp, wait_for_uuid=None, max_wait=15, error_on_wait_exceeded=False) -> List[FireXTask]:
         if wait_for_uuid:
-            wait_for_task_exist(self.does_task_uuid_exist, max_wait, wait_for_uuid, error_on_wait_exceeded)
+            wait_before_query(self.does_task_uuid_exist, max_wait, wait_for_uuid, error_on_wait_exceeded)
 
         result = self.db_conn.execute(select([firex_tasks]).where(exp))
         return [FireXTask(*row) for row in result]
