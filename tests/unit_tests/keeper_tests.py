@@ -78,6 +78,14 @@ class FireXKeeperTests(unittest.TestCase):
             child_uuids = {t.uuid for t in tree.children}
             self.assertEqual({'4', '5'}, child_uuids)
 
+    def test_query_tree_not_found(self):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            logs_dir = str(tmpdirname)
+            _write_events_to_db(logs_dir, tree_events)
+
+            tree = task_query.task_tree(logs_dir, root_uuid='not exists')
+            self.assertIsNone(tree)
+
     def test_get_decendants(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
             logs_dir = str(tmpdirname)
@@ -86,6 +94,14 @@ class FireXKeeperTests(unittest.TestCase):
             tasks = task_query.get_descendants(logs_dir, '3')
             child_uuids = {t.uuid for t in tasks}
             self.assertEqual({'4', '5'}, child_uuids)
+
+    def test_get_decendants_not_found(self):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            logs_dir = str(tmpdirname)
+            _write_events_to_db(logs_dir, tree_events)
+
+            tasks = task_query.get_descendants(logs_dir, 'not found UUID')
+            self.assertEqual([], tasks)
 
     def test_find_task_causing_chain_exception(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
