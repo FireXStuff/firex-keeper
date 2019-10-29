@@ -48,7 +48,7 @@ def wait_before_query(query_task_by_uuid_fn, max_wait, wait_for_uuid, error_on_w
     if wait_for_uuid == WAIT_FOR_CURRENT_UUID:
         wait_for_uuid = current_task.request.id
 
-    uuid_exists = wait_until(query_task_by_uuid_fn, max_wait, 1, wait_for_uuid)
+    uuid_exists = wait_until(query_task_by_uuid_fn, max_wait, 0.5, wait_for_uuid)
     wait_duration = perf_counter() - start_wait_time
     logger.debug("Keeper query waited %.2f secs for task %s to exist." % (wait_duration, wait_for_uuid))
     if not uuid_exists:
