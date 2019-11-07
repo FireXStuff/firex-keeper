@@ -7,7 +7,7 @@ from firexapp.events.model import RunStates
 from firexapp.common import wait_until
 
 from firex_keeper import task_query
-from firex_keeper.persist import get_db_manager
+from firex_keeper.persist import get_db_manager, task_by_uuid_exp
 
 
 @app.task()
@@ -44,7 +44,9 @@ class KeepNoopData(FlowTestConfiguration):
 
 @app.task(bind=True)
 def wait_before_query_on_self(self, uid):
-    self_task = task_query.task_by_uuid(uid.logs_dir, self.request.id, wait_before_query=True)
+    self_task = task_query.task_by_uuid(uid.logs_dir, self.request.id,
+                                        wait_for_exp_exist=task_by_uuid_exp(self.request.id),
+                                        error_on_wait_exceeded=True)
     assert self_task.uuid == self.request.id
 
 
