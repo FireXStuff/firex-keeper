@@ -5,17 +5,26 @@ from contextlib import contextmanager
 from time import perf_counter
 
 from sqlalchemy import create_engine
-from sqlalchemy.sql import select
+from sqlalchemy.sql import select, and_
 
-from celery import current_task
-from firexapp.events.model import FireXTask, FireXRunMetadata, get_task_data
+from firexapp.events.model import FireXTask, FireXRunMetadata, get_task_data, COMPLETE_RUNSTATES
 from firexapp.common import wait_until
 from firex_keeper.db_model import metadata, firex_run_metadata, firex_tasks
 
 logger = logging.getLogger(__name__)
 
 
-WAIT_FOR_CURRENT_UUID = 'use global current uuid'
+class FireXWaitQueryExceeded(Exception):
+    pass
+
+
+def task_by_uuid_exp(task_uuid):
+    return firex_tasks.c.uuid == task_uuid
+
+
+def task_uuid_complete_exp(task_uuid):
+    return and_(firex_tasks.c.uuid == task_uuid,
+                firex_tasks.c.state.in_(COMPLETE_RUNSTATES))
 
 
 def connect_db(db_file):
@@ -40,23 +49,6 @@ def get_db_file_path(logs_dir, new=False):
 
 def create_db_manager(logs_dir):
     return FireXRunDbManager(connect_db(get_db_file_path(logs_dir, new=True)))
-
-
-def wait_before_query(query_task_by_uuid_fn, max_wait, wait_for_uuid, error_on_wait_exceeded):
-    start_wait_time = perf_counter()
-    # TODO: could generalize this function to also wait on entire keeper process being complete.
-    if wait_for_uuid == WAIT_FOR_CURRENT_UUID:
-        wait_for_uuid = current_task.request.id
-
-    uuid_exists = wait_until(query_task_by_uuid_fn, max_wait, 0.5, wait_for_uuid)
-    wait_duration = perf_counter() - start_wait_time
-    logger.debug("Keeper query waited %.2f secs for task %s to exist." % (wait_duration, wait_for_uuid))
-    if not uuid_exists:
-        msg = "Waited %d seconds for task %s, but it still doesn't exist." % (max_wait, wait_for_uuid)
-        if error_on_wait_exceeded:
-            raise Exception(msg)
-        else:
-            logger.warning(msg)
 
 
 @contextmanager
@@ -107,13 +99,25 @@ class FireXRunDbManager:
     def _update_task(self, uuid, task) -> None:
         self.db_conn.execute(firex_tasks.update().where(firex_tasks.c.uuid == uuid).values(**task))
 
-    def does_task_uuid_exist(self, task_uuid):
-        query = select([firex_tasks.c.uuid]).where(firex_tasks.c.uuid == task_uuid)
+    def does_task_whereclause_exist(self, whereclause):
+        query = select([firex_tasks.c.uuid]).where(whereclause)
         return self.db_conn.execute(query).scalar() is not None
 
-    def query_tasks(self, exp, wait_for_uuid=None, max_wait=15, error_on_wait_exceeded=False) -> List[FireXTask]:
-        if wait_for_uuid:
-            wait_before_query(self.does_task_uuid_exist, max_wait, wait_for_uuid, error_on_wait_exceeded)
+    def wait_before_query(self, whereclause, max_wait, error_on_wait_exceeded):
+        start_wait_time = perf_counter()
+        exists = wait_until(self.does_task_whereclause_exist, max_wait, 0.5, whereclause)
+        wait_duration = perf_counter() - start_wait_time
+        logger.debug("Keeper query waited %.2f secs for wait query to exist." % wait_duration)
+        if not exists:
+            msg = "Wait exceeded %d seconds for %s to exist, but it still does not." % (max_wait, whereclause)
+            if error_on_wait_exceeded:
+                raise FireXWaitQueryExceeded(msg)
+            else:
+                logger.warning(msg)
+
+    def query_tasks(self, exp, wait_for_exp_exist=None, max_wait=15, error_on_wait_exceeded=False) -> List[FireXTask]:
+        if wait_for_exp_exist is not None:
+            self.wait_before_query(wait_for_exp_exist, max_wait, error_on_wait_exceeded)
 
         result = self.db_conn.execute(select([firex_tasks]).where(exp))
         return [FireXTask(*row) for row in result]
