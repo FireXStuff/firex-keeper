@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 from typing import List
@@ -26,10 +27,17 @@ def task_uuid_complete_exp(task_uuid):
     return and_(firex_tasks.c.uuid == task_uuid,
                 firex_tasks.c.state.in_(COMPLETE_RUNSTATES))
 
+def _custom_json_loads(*args, **kwargs):
+    # JSON columns can still store ints in sqlite, so pass these values along even though they can't be decoded as
+    # JSON.
+    if isinstance(args[0], int):
+        return args[0]
+    return json.loads(*args, **kwargs)
+
 
 def connect_db(db_file):
     create_schema = not os.path.exists(db_file)
-    engine = create_engine('sqlite:///' + db_file)
+    engine = create_engine('sqlite:///' + db_file, json_deserializer=_custom_json_loads)
     if create_schema:
         logger.info("Creating schema for %s" % db_file)
         metadata.create_all(engine)

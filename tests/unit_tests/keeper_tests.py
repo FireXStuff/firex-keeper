@@ -158,3 +158,11 @@ class FireXKeeperTests(unittest.TestCase):
             tasks = task_query.tasks_by_name(logs_dir, 'Noop', wait_for_exp_exist=task_uuid_complete_exp('1'),
                                              max_wait=1, error_on_wait_exceeded=True)
             self.assertEqual(2, len(tasks))
+
+    def test_int_in_json_column(self):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            logs_dir = str(tmpdirname)
+            _write_events_to_db(logs_dir, [{'uuid': '1', 'name': 'Noop', 'firex_result': 0}])
+
+            task = task_query.single_task_by_name(logs_dir, 'Noop')
+            self.assertEqual(0, task.firex_result)
