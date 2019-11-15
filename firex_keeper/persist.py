@@ -27,6 +27,14 @@ def task_uuid_complete_exp(task_uuid):
     return and_(firex_tasks.c.uuid == task_uuid,
                 firex_tasks.c.state.in_(COMPLETE_RUNSTATES))
 
+
+def cur_task_by_uuid_exp():
+    from celery import current_task
+    if not current_task:
+        return False
+    return task_by_uuid_exp(current_task.request.id)
+
+
 def _custom_json_loads(*args, **kwargs):
     # JSON columns can still store ints in sqlite, so pass these values along even though they can't be decoded as
     # JSON.
