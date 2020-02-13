@@ -14,7 +14,6 @@ from firexapp.events.model import FireXRunMetadata
 from firex_keeper.keeper_event_consumer import TaskDatabaseAggregatorThread
 from firex_keeper.keeper_helper import get_keeper_dir
 
-
 logger = logging.getLogger(__name__)
 
 
