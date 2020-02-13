@@ -21,6 +21,11 @@ def celery_app_from_logs_dir(logs_dir):
     return Celery(broker=RedisManager.get_broker_url_from_metadata(logs_dir))
 
 
+def _sig_handler(_, __):
+    logger.warning("Received SIGTERM.")
+    sys.exit(1)
+
+
 def init_keeper():
     parser = argparse.ArgumentParser()
     parser.add_argument("--logs_dir", help="Logs directory for the run to keep task data for.",
@@ -40,6 +45,9 @@ def init_keeper():
     os.makedirs(keeper_dir, exist_ok=True)
     logging.basicConfig(filename=os.path.join(keeper_dir, 'keeper.log'), level=logging.DEBUG, filemode='w',
                         format='[%(asctime)s %(levelname)s] %(message)s', datefmt="%Y-%m-%d %H:%M:%S")
+    logger.info('Starting Keeper with args: %s' % args)
+
+    signal.signal(signal.SIGTERM, _sig_handler)
 
     celery_app = celery_app_from_logs_dir(run_metadata.logs_dir)
     return celery_app, run_metadata, args.broker_recv_ready_file
@@ -47,5 +55,12 @@ def init_keeper():
 
 def main():
     celery_app, run_metadata, receiver_ready_file = init_keeper()
-    TaskDatabaseAggregatorThread(celery_app, run_metadata,
-                                 receiver_ready_file=receiver_ready_file).run()
+    try:
+        TaskDatabaseAggregatorThread(celery_app, run_metadata,
+                                     receiver_ready_file=receiver_ready_file).run()
+    except Exception as e:
+        logger.error("Keeper process terminating due to error.")
+        logger.exception(e)
+        raise
+    else:
+        logger.info("Keeper process terminating gracefully.")

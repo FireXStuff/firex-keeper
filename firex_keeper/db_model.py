@@ -1,5 +1,3 @@
-from collections import namedtuple
-
 from sqlalchemy import Table, Column, Integer, String, MetaData, ForeignKey, Boolean, Float, Text
 from sqlalchemy.types import JSON
 
@@ -7,6 +5,9 @@ from firexapp.events.model import RunMetadataColumn, TaskColumn
 
 
 UUID_LEN = 37
+HOSTNAME_LEN = 40
+LOGS_URL_LEN = 200
+EXCEPTION_LEN = 200
 
 
 metadata = MetaData()
@@ -20,7 +21,6 @@ firex_run_metadata = Table(
     Column('keeper_complete', Boolean, default=False),
 )
 
-
 COLS_TO_SQLALCHEMY_CONFIG = {
     # TODO: consider making uuid an integer, converted before & after write.
     TaskColumn.UUID: {'kwargs': {'type_': String(UUID_LEN), 'primary_key': True}},
@@ -30,8 +30,8 @@ COLS_TO_SQLALCHEMY_CONFIG = {
     TaskColumn.RESULTS: {'kwargs': {'type_': JSON, 'default': None}},
     TaskColumn.DEFAULT_BOUND_ARGS: {'kwargs': {'type_': JSON, 'default': None}},
     TaskColumn.FROM_PLUGIN: {'kwargs': {'type_': Boolean, 'default': None}},
-    TaskColumn.HOSTNAME: {'kwargs': {'type_': String(40), 'default': None}},
-    TaskColumn.LOGS_URL: {'kwargs': {'type_': String(200), 'default': None}},
+    TaskColumn.HOSTNAME: {'kwargs': {'type_': String(HOSTNAME_LEN), 'default': None}},
+    TaskColumn.LOGS_URL: {'kwargs': {'type_': String(LOGS_URL_LEN), 'default': None}},
     TaskColumn.LONG_NAME: {'kwargs': {'type_': String(100)}},
     TaskColumn.NAME: {'kwargs': {'type_': String(30)}},
     TaskColumn.ACTUAL_RUNTIME: {'kwargs': {'type_': Float, 'default': None}},
@@ -41,7 +41,7 @@ COLS_TO_SQLALCHEMY_CONFIG = {
     TaskColumn.STATE: {'kwargs': {'type_': String(15), 'default': None}},
     TaskColumn.TASK_NUM: {'kwargs': {'type_': Integer, 'default': None}},
     TaskColumn.UTCOFFSET: {'kwargs': {'type_': Integer, 'default': None}},
-    TaskColumn.EXCEPTION: {'kwargs': {'type_': String(200), 'default': None}},
+    TaskColumn.EXCEPTION: {'kwargs': {'type_': String(EXCEPTION_LEN), 'default': None}},
     TaskColumn.TRACEBACK: {'kwargs': {'type_': Text, 'default': None}},
 }
 
