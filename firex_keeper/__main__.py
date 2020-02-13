@@ -1,6 +1,11 @@
 import argparse
 import logging
 import os
+import sys
+import signal
+
+# Prevent dependencies from taking module loading hit of pkg_resources.
+sys.modules["pkg_resources"] = type('noop', (object,), {})
 
 from celery.app.base import Celery
 
