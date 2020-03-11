@@ -59,3 +59,18 @@ class WaitOnSelfQueryTest(FlowTestConfiguration):
 
     def assert_expected_return_code(self, ret_value):
         assert_is_good_run(ret_value)
+
+
+class CompleteTest(FlowTestConfiguration):
+    sync = False
+
+    def initial_firex_options(self) -> list:
+        return ["submit", "--chain", "nop"]
+
+    def assert_expected_firex_output(self, cmd_output, cmd_err):
+        logs_dir = get_log_dir_from_output(cmd_output)
+        keeper_complete = task_query.wait_on_keeper_complete(logs_dir)
+        assert keeper_complete, "Keeper database is not complete."
+
+    def assert_expected_return_code(self, ret_value):
+        assert_is_good_run(ret_value)
