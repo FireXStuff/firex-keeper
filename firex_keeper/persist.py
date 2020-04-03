@@ -45,14 +45,17 @@ def _custom_json_loads(*args, **kwargs):
     return json.loads(*args, **kwargs)
 
 
-@event.listens_for(Engine, "connect")
-def set_sqlite_pragma(dbapi_connection, _):
-    cursor = dbapi_connection.cursor()
-    pragma_cmd = "PRAGMA journal_mode=WAL"
-    cursor.execute(pragma_cmd)
-    cursor.close()
-
-    logger.info("Executed: " + pragma_cmd)
+def set_sqlite_pragma(engine):
+    dbapi_connection = engine.raw_connection()
+    try:
+        cursor = dbapi_connection.cursor()
+        pragma_cmd = "PRAGMA journal_mode=WAL"
+        cursor.execute(pragma_cmd)
+        cursor.close()
+        logger.info("Executed: " + pragma_cmd)
+        dbapi_connection.commit()
+    finally:
+        dbapi_connection.close()
 
 
 def connect_db(db_file):
@@ -61,7 +64,9 @@ def connect_db(db_file):
     if create_schema:
         logger.info("Creating schema for %s" % db_file)
         metadata.create_all(engine)
+        set_sqlite_pragma(engine)
         logger.info("Schema creation complete for %s" % db_file)
+
     return engine.connect()
 
 
