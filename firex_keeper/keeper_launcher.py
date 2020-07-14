@@ -18,8 +18,10 @@ class FireXKeeperLauncher(TrackingService):
         self.broker_recv_ready_file = None
 
     def start(self, args, uid=None, **kwargs)->{}:
-        logs_dir = uid.logs_dir
-        self.broker_recv_ready_file = os.path.join(get_keeper_dir(logs_dir), 'keeper_celery_recvr_ready')
+        keeper_debug_dir = get_keeper_dir(uid.logs_dir)
+        os.makedirs(keeper_debug_dir, exist_ok=True)
+        self.broker_recv_ready_file = os.path.join(keeper_debug_dir, 'keeper_celery_recvr_ready')
+        stdout_file = os.path.join(keeper_debug_dir, 'keeper.stdout')
 
         cmd = [qualify_firex_bin("firex_keeper"),
                "--uid", str(uid),
@@ -27,9 +29,10 @@ class FireXKeeperLauncher(TrackingService):
                "--chain", args.chain,
                "--broker_recv_ready_file", self.broker_recv_ready_file,
                ]
-        pid = subprocess.Popen(cmd,
-                               stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
-                               close_fds=True).pid
+        with open(stdout_file, 'w+') as f:
+            pid = subprocess.Popen(cmd,
+                                   stdout=f, stderr=subprocess.STDOUT,
+                                   close_fds=True).pid
 
         try:
             Process(pid).wait(0.1)
