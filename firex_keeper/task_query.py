@@ -19,7 +19,7 @@ def _task_col_eq(task_col, val):
 
 
 def _query_tasks(logs_dir, query, **kwargs) -> List[FireXTask]:
-    with get_db_manager(logs_dir) as db_manager:
+    with get_db_manager(logs_dir, read_only=True) as db_manager:
         return db_manager.query_tasks(query, **kwargs)
 
 
@@ -150,5 +150,5 @@ def find_task_causing_chain_exception(task: FireXTreeTask):
 
 def wait_on_keeper_complete(logs_dir, timeout=15) -> bool:
     from firexapp.common import wait_until
-    with get_db_manager(logs_dir) as db_manager:
+    with get_db_manager(logs_dir, read_only=True) as db_manager:
         return wait_until(db_manager.is_keeper_complete, timeout=timeout, sleep_for=0.5)

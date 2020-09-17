@@ -57,10 +57,20 @@ def set_sqlite_pragma(engine):
     finally:
         dbapi_connection.close()
 
+def _db_connection_str(db_file, read_only):
+    db_conn_str = 'sqlite:///'
+    if read_only:
+        db_conn_str += 'file:'
 
-def connect_db(db_file):
+    db_conn_str += db_file
+    if read_only:
+        db_conn_str += '?mode=ro&uri=true'
+    return db_conn_str
+
+
+def connect_db(db_file, read_only=False):
     create_schema = not os.path.exists(db_file)
-    engine = create_engine('sqlite:///' + db_file, json_deserializer=_custom_json_loads)
+    engine = create_engine(_db_connection_str(db_file, read_only), json_deserializer=_custom_json_loads)
     if create_schema:
         logger.info("Creating schema for %s" % db_file)
         metadata.create_all(engine)
@@ -70,26 +80,30 @@ def connect_db(db_file):
     return engine.connect()
 
 
-def get_db_file_path(logs_dir, new=False):
-    parent = os.path.join(logs_dir, 'debug', 'keeper')
-    db_file = os.path.join(parent, 'firex_run.db')
+def get_db_file_path(logs_dir):
+    return os.path.join(logs_dir, 'debug', 'keeper', 'firex_run.db')
+
+
+def get_db_file(logs_dir, new=False):
+    db_file = get_db_file_path(logs_dir)
     if new:
         assert not os.path.exists(db_file), "Cannot create new DB file, it already exists: %s" % db_file
-        os.makedirs(parent, exist_ok=True)
+        db_file_parent = os.path.dirname(db_file)
+        os.makedirs(db_file_parent, exist_ok=True)
     else:
         assert os.path.exists(db_file), "DB file does not exist: %s" % db_file
     return db_file
 
 
 def create_db_manager(logs_dir):
-    conn = connect_db(get_db_file_path(logs_dir, new=True))
+    conn = connect_db(get_db_file(logs_dir, new=True), read_only=False)
     logger.info("Created DB connection.")
     return FireXRunDbManager(conn)
 
 
 @contextmanager
-def get_db_manager(logs_dir):
-    db_manager = FireXRunDbManager(connect_db(get_db_file_path(logs_dir, new=False)))
+def get_db_manager(logs_dir, read_only=False):
+    db_manager = FireXRunDbManager(connect_db(get_db_file(logs_dir, new=False), read_only=read_only))
     try:
         yield db_manager
     finally:
