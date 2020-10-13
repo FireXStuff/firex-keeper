@@ -34,7 +34,6 @@ class TaskDatabaseAggregatorThread(BrokerEventConsumerThread):
         self.run_db_manager.insert_or_update_tasks(new_task_data_by_uuid,
                                                    self.event_aggregator.root_uuid)
 
-
     def _on_cleanup(self):
         self.run_db_manager.set_keeper_complete()
         self.run_db_manager.close()

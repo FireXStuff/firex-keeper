@@ -1,5 +1,7 @@
 import os
+import urllib.parse
 
+import requests
 from firexapp.engine.celery import app
 from firexapp.submit.submit import get_log_dir_from_output
 from firexapp.testing.config_base import FlowTestConfiguration, assert_is_good_run
@@ -8,6 +10,7 @@ from firexapp.common import wait_until
 
 from firex_keeper import task_query
 from firex_keeper.persist import get_db_manager, task_by_uuid_exp
+from firex_keeper.keeper_helper import get_keeper_url
 
 
 @app.task()
@@ -71,6 +74,26 @@ class CompleteTest(FlowTestConfiguration):
         logs_dir = get_log_dir_from_output(cmd_output)
         keeper_complete = task_query.wait_on_keeper_complete(logs_dir)
         assert keeper_complete, "Keeper database is not complete."
+
+    def assert_expected_return_code(self, ret_value):
+        assert_is_good_run(ret_value)
+
+
+class KeeperWebserverTest(FlowTestConfiguration):
+    sync = False
+
+    def initial_firex_options(self) -> list:
+        return ["submit", "--chain", "sleep", '--sleep', '10', '--disable_blaze', 'True']
+
+    def assert_expected_firex_output(self, cmd_output, cmd_err):
+        logs_dir = get_log_dir_from_output(cmd_output)
+        keeper_url = get_keeper_url(logs_dir)
+        assert requests.get(urllib.parse.urljoin(keeper_url, '/alive')).ok, "Expected keeper webserver to be alive."
+
+        from firex_keeper import keeper_rest_client
+        tasks = keeper_rest_client.all_tasks(logs_dir)
+        print(tasks)
+        assert any(t.name == 'sleep' for t in tasks)
 
     def assert_expected_return_code(self, ret_value):
         assert_is_good_run(ret_value)

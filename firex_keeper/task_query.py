@@ -1,10 +1,13 @@
 import logging
 from typing import List
+import os
 
 from firexapp.events.model import TaskColumn, RunStates, FireXTask, is_chain_exception, get_chain_exception_child_uuid
 from firex_keeper.db_model import firex_tasks
-from firex_keeper.persist import get_db_manager
-from firex_keeper.keeper_helper import FireXTreeTask
+from firex_keeper.persist import get_db_manager, get_db_file_path
+from firex_keeper.keeper_helper import FireXTreeTask, get_keeper_metadata
+from firex_keeper import keeper_rest_client, keeper_file_client
+from firex_keeper.keeper_file_client import FireXTaskQueryException
 
 
 logger = logging.getLogger(__name__)
@@ -24,7 +27,10 @@ def _query_tasks(logs_dir, query, **kwargs) -> List[FireXTask]:
 
 
 def all_tasks(logs_dir, **kwargs) -> List[FireXTask]:
-    return _query_tasks(logs_dir, True, **kwargs)
+    keeper_metadata = get_keeper_metadata(logs_dir)
+    if keeper_metadata['is_complete']:
+        return keeper_file_client.all_tasks(logs_dir, **kwargs)
+    return keeper_rest_client.all_tasks(logs_dir, **kwargs)
 
 
 def tasks_by_name(logs_dir, name, **kwargs) -> List[FireXTask]:
@@ -45,14 +51,11 @@ def task_by_uuid(logs_dir, uuid, **kwargs) -> FireXTask:
     return tasks[0]
 
 
-def task_by_name_and_arg_pred(logs_dir, name, arg, pred) -> List[FireXTask]:
-    tasks_with_name = tasks_by_name(logs_dir, name)
-    return [t for t in tasks_with_name if arg in t.firex_bound_args and pred(t.firex_bound_args[arg])]
-
-
-def task_by_name_and_arg_value(logs_dir, name, arg, value) -> List[FireXTask]:
-    pred = lambda arg_value: arg_value == value
-    return task_by_name_and_arg_pred(logs_dir, name, arg, pred)
+def sibling_task_by_name(logs_dir, sib_uuid, other_sib_name) -> List[FireXTask]:
+    #TODO: this is overkill. Write the the SQL.
+    first_sib_task = task_by_uuid(logs_dir, sib_uuid)
+    parent_descendants = get_descendants(logs_dir, first_sib_task.parent_id)
+    return [t for t in parent_descendants if t.parent_id == first_sib_task.parent_id and t.name == other_sib_name]
 
 
 def failed_tasks(logs_dir, **kwargs) -> List[FireXTask]:
@@ -150,5 +153,6 @@ def find_task_causing_chain_exception(task: FireXTreeTask):
 
 def wait_on_keeper_complete(logs_dir, timeout=15) -> bool:
     from firexapp.common import wait_until
+
     with get_db_manager(logs_dir, read_only=True) as db_manager:
         return wait_until(db_manager.is_keeper_complete, timeout=timeout, sleep_for=0.5)

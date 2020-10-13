@@ -7,8 +7,6 @@ from time import perf_counter
 
 from sqlalchemy import create_engine
 from sqlalchemy.sql import select, and_
-from sqlalchemy.engine import Engine
-from sqlalchemy import event
 
 from firexapp.events.model import FireXTask, FireXRunMetadata, get_task_data, COMPLETE_RUNSTATES
 from firexapp.common import wait_until
