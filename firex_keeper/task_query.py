@@ -1,9 +1,10 @@
 import logging
 from typing import List
+import os
 
 from firexapp.events.model import TaskColumn, RunStates, FireXTask, is_chain_exception, get_chain_exception_child_uuid
 from firex_keeper.db_model import firex_tasks
-from firex_keeper.persist import get_db_manager
+from firex_keeper.persist import get_db_manager, get_db_file_path
 from firex_keeper.keeper_helper import FireXTreeTask
 
 
@@ -150,5 +151,7 @@ def find_task_causing_chain_exception(task: FireXTreeTask):
 
 def wait_on_keeper_complete(logs_dir, timeout=15) -> bool:
     from firexapp.common import wait_until
+    # FIXME: subtract time spent waiting on file before waiting on DB state.
+    wait_until(os.path.isfile, timeout, 1, get_db_file_path(logs_dir))
     with get_db_manager(logs_dir, read_only=True) as db_manager:
         return wait_until(db_manager.is_keeper_complete, timeout=timeout, sleep_for=0.5)
