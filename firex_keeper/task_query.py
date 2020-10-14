@@ -6,6 +6,7 @@ from firexapp.events.model import TaskColumn, RunStates, FireXTask, is_chain_exc
 from firex_keeper.db_model import firex_tasks
 from firex_keeper.persist import get_db_manager, get_db_file_path
 from firex_keeper.keeper_helper import FireXTreeTask
+from firexapp.common import wait_until
 
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ def _task_col_eq(task_col, val):
 
 def _query_tasks(logs_dir, query, **kwargs) -> List[FireXTask]:
     with get_db_manager(logs_dir, read_only=True) as db_manager:
+        wait_on_db_file_query_ready(logs_dir, db_manager=db_manager)
         return db_manager.query_tasks(query, **kwargs)
 
 
@@ -149,9 +151,26 @@ def find_task_causing_chain_exception(task: FireXTreeTask):
     return find_task_causing_chain_exception(causing_child)
 
 
+def _wait_task_table_exist(db_manager, timeout):
+    return wait_until(db_manager.task_table_exists, timeout=timeout, sleep_for=0.5)
+
+
+def wait_on_db_file_query_ready(logs_dir, timeout=15, db_manager=None):
+    db_file_exists = wait_until(os.path.isfile, timeout, 1, get_db_file_path(logs_dir))
+    if not db_file_exists:
+        return db_file_exists
+
+    if db_manager:
+        return _wait_task_table_exist(db_manager, timeout)
+    else:
+        with get_db_manager(logs_dir, read_only=True) as db_manager:
+            return _wait_task_table_exist(db_manager, timeout)
+
+
 def wait_on_keeper_complete(logs_dir, timeout=15) -> bool:
-    from firexapp.common import wait_until
-    # FIXME: subtract time spent waiting on file before waiting on DB state.
-    wait_until(os.path.isfile, timeout, 1, get_db_file_path(logs_dir))
+    # FIXME: subtract time spent waiting on query ready and schema before waiting on DB state.
+    db_file_query_ready = wait_on_db_file_query_ready(logs_dir, timeout=timeout)
+    if not db_file_query_ready:
+        return db_file_query_ready
     with get_db_manager(logs_dir, read_only=True) as db_manager:
         return wait_until(db_manager.is_keeper_complete, timeout=timeout, sleep_for=0.5)

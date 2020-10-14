@@ -7,12 +7,10 @@ from time import perf_counter
 
 from sqlalchemy import create_engine
 from sqlalchemy.sql import select, and_
-from sqlalchemy.engine import Engine
-from sqlalchemy import event
 
 from firexapp.events.model import FireXTask, FireXRunMetadata, get_task_data, COMPLETE_RUNSTATES
 from firexapp.common import wait_until
-from firex_keeper.db_model import metadata, firex_run_metadata, firex_tasks
+from firex_keeper.db_model import metadata, firex_run_metadata, firex_tasks, TASKS_TABLENAME
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +197,10 @@ class FireXRunDbManager:
 
     def query_single_run_metadata(self) -> FireXRunMetadata:
         return _row_to_run_metadata(self._query_single_run_metadata_row())
+
+    def task_table_exists(self):
+        result = self.db_conn.execute(f'SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name="{TASKS_TABLENAME}");')
+        return bool([r for r in result][0][0])
 
     def close(self):
         self.db_conn.close()

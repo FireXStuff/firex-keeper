@@ -52,5 +52,6 @@ TASK_COLUMNS = [Column(tc.value,
                        **COLS_TO_SQLALCHEMY_CONFIG[tc]['kwargs'])
                 for tc in TaskColumn]
 
-firex_tasks = Table('firex_tasks', metadata, *TASK_COLUMNS)
+TASKS_TABLENAME = 'firex_tasks'
+firex_tasks = Table(TASKS_TABLENAME, metadata, *TASK_COLUMNS)
 

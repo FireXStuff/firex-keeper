@@ -4,7 +4,7 @@ import tempfile
 from firexkit.result import ChainInterruptedException
 from firexapp.events.model import RunStates, FireXRunMetadata
 from firex_keeper.keeper_event_consumer import TaskDatabaseAggregatorThread
-from firex_keeper.persist import task_by_uuid_exp, task_uuid_complete_exp, FireXWaitQueryExceeded
+from firex_keeper.persist import task_by_uuid_exp, task_uuid_complete_exp, FireXWaitQueryExceeded, create_db_manager
 from firex_keeper import task_query
 
 
@@ -166,3 +166,16 @@ class FireXKeeperTests(unittest.TestCase):
 
             task = task_query.single_task_by_name(logs_dir, 'Noop')
             self.assertEqual(0, task.firex_result)
+
+    def test_task_table_exists(self):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            self.assertTrue(create_db_manager(tmpdirname).task_table_exists())
+
+    def test_task_table_not_exists(self):
+        from firex_keeper.persist import _db_connection_str, FireXRunDbManager
+        from sqlalchemy import create_engine
+
+        with tempfile.NamedTemporaryFile() as db_file:
+            engine = create_engine(_db_connection_str(db_file.name, False))
+            db_manager = FireXRunDbManager(engine.connect())
+            self.assertFalse(db_manager.task_table_exists())
