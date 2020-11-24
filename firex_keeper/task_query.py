@@ -20,10 +20,26 @@ def _task_col_eq(task_col, val):
     return firex_tasks.c[task_col.value] == val
 
 
-def _query_tasks(logs_dir, query, **kwargs) -> List[FireXTask]:
+def _wait_and_query(logs_dir, query, db_file_query_ready_timeout, **kwargs) -> List[FireXTask]:
     with get_db_manager(logs_dir, read_only=True) as db_manager:
-        wait_on_db_file_query_ready(logs_dir, db_manager=db_manager)
+        wait_on_db_file_query_ready(logs_dir, db_manager=db_manager, timeout=db_file_query_ready_timeout)
         return db_manager.query_tasks(query, **kwargs)
+
+
+def _query_tasks(logs_dir, query, db_file_query_ready_timeout=15, copy_before_query=False, **kwargs) -> List[FireXTask]:
+
+    if copy_before_query:
+        from tempfile import TemporaryDirectory
+        from firex_keeper.persist import get_db_file
+        import shutil
+        with TemporaryDirectory() as temp_log_dir:
+            existing_db_file = get_db_file(logs_dir, new=False)
+            new_tmp_db_file = get_db_file(temp_log_dir, new=True)
+            shutil.copyfile(existing_db_file, new_tmp_db_file)
+            query_results = _wait_and_query(temp_log_dir, query, db_file_query_ready_timeout, **kwargs)
+    else:
+        query_results = _wait_and_query(logs_dir, query, db_file_query_ready_timeout, **kwargs)
+    return query_results
 
 
 def all_tasks(logs_dir, **kwargs) -> List[FireXTask]:
@@ -77,10 +93,16 @@ def _child_ids_by_parent_id(tasks_by_uuid):
     return child_uuids_by_parent_id
 
 
-def _tasks_to_tree(root_uuid, tasks_by_uuid) -> FireXTreeTask:
+def _get_tree_tasks_by_uuid(root_uuid, tasks_by_uuid):
+    if root_uuid is None:
+        root_uuid = next((t.uuid for t in tasks_by_uuid.values() if t.parent_id is None), None)
+        # FIXME: handle multiple roots?
+        if root_uuid is None:
+            raise Exception("Found no root task with null parent_id.")
+
     child_ids_by_parent_id = _child_ids_by_parent_id(tasks_by_uuid)
 
-    uuids_to_add = [tasks_by_uuid[root_uuid].uuid]
+    uuids_to_add = [root_uuid]
     tree_tasks_by_uuid = {}
 
     while uuids_to_add:
@@ -95,7 +117,11 @@ def _tasks_to_tree(root_uuid, tasks_by_uuid) -> FireXTreeTask:
 
         uuids_to_add += child_ids_by_parent_id[cur_tree_task.uuid]
 
-    return tree_tasks_by_uuid[root_uuid]
+    return tree_tasks_by_uuid
+
+
+def _tasks_to_tree(root_uuid, tasks_by_uuid) -> FireXTreeTask:
+    return _get_tree_tasks_by_uuid(root_uuid, tasks_by_uuid)[root_uuid]
 
 
 def task_tree(logs_dir, root_uuid=None, **kwargs) -> FireXTreeTask:
@@ -106,10 +132,16 @@ def task_tree(logs_dir, root_uuid=None, **kwargs) -> FireXTreeTask:
         # TODO: could avoid fetching all tasks by using sqlite recursive query.
         all_tasks_by_uuid = {t.uuid: t for t in db_manager.query_tasks(True, **kwargs)}
 
-        if root_uuid not in all_tasks_by_uuid:
-            return None
+    if root_uuid not in all_tasks_by_uuid:
+        return None
+    return _tasks_to_tree(root_uuid, all_tasks_by_uuid)
 
-        return _tasks_to_tree(root_uuid, all_tasks_by_uuid)
+
+def task_tree_to_task(task_tree: FireXTreeTask) -> FireXTask:
+    task_tree_dict = task_tree._asdict()
+    task_tree_dict.pop('children')
+    task_tree_dict.pop('parent')
+    return FireXTask(**task_tree_dict)
 
 
 def flatten_tree(task_tree: FireXTreeTask) -> List[FireXTreeTask]:
@@ -129,6 +161,19 @@ def get_descendants(logs_dir, uuid) -> List[FireXTreeTask]:
     if subtree is None:
         return []
     return [t for t in flatten_tree(subtree) if t.uuid != uuid]
+
+
+def ancestor_by_long_name(logs_dir, uuid, ancestor_long_name, **kwargs) -> FireXTreeTask:
+    tasks_by_uuid = {t.uuid: t for t in all_tasks(logs_dir, **kwargs)}
+    # TODO: could avoid fetching all tasks by using sqlite recursive query.
+    tree_tasks_by_uuid = _get_tree_tasks_by_uuid(None, tasks_by_uuid)
+    if uuid in tree_tasks_by_uuid:
+        tree_task = tree_tasks_by_uuid[uuid]
+        while tree_task.parent and tree_task.parent.long_name != ancestor_long_name:
+            tree_task = tree_task.parent
+        if tree_task.parent.long_name == ancestor_long_name:
+            return tree_task.parent
+    return None
 
 
 def find_task_causing_chain_exception(task: FireXTreeTask):
