@@ -21,7 +21,7 @@ class FireXKeeperLauncher(TrackingService):
         keeper_debug_dir = get_keeper_dir(uid.logs_dir)
         os.makedirs(keeper_debug_dir, exist_ok=True)
         self.broker_recv_ready_file = os.path.join(keeper_debug_dir, 'keeper_celery_recvr_ready')
-        stdout_file = os.path.join(keeper_debug_dir, 'keeper.stdout')
+        stdout_file = os.path.join(keeper_debug_dir, 'keeper.stdout.txt')
 
         cmd = [qualify_firex_bin("firex_keeper"),
                "--uid", str(uid),
