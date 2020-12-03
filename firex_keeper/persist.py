@@ -5,6 +5,7 @@ from typing import List
 from contextlib import contextmanager
 from time import perf_counter
 
+from firexapp.submit.uid import Uid
 from sqlalchemy import create_engine
 from sqlalchemy.sql import select, and_
 
@@ -79,7 +80,7 @@ def connect_db(db_file, read_only=False):
 
 
 def get_db_file_path(logs_dir):
-    return os.path.join(logs_dir, 'debug', 'keeper', 'firex_run.db')
+    return os.path.join(logs_dir, Uid.debug_dirname, 'keeper', 'firex_run.db')
 
 
 def get_db_file(logs_dir, new=False):
