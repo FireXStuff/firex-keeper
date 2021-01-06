@@ -37,6 +37,14 @@ test-unit:
     paths:
       - .coverage
 
+build-docs:
+  stage:  test
+  script:
+    - firex-build docs
+  artifacts:
+    paths:
+      - html/ 
+      
 test-integration:
   stage: test
   script:
@@ -70,18 +78,5 @@ upload-pkg:
   script:
     - pip install keyrings.alt
     - firex-build upload_pip
-  only:
-    - tags
-
-update-docs:
-  inherit:
-    default: false
-  stage: update-docs
-  image: google/cloud-sdk
-  script:
-    - gcloud auth activate-service-account --key-file $GOOGLE_APPLICATION_CREDENTIALS
-    - gsutil -m rsync -r html gs://www.firexkit.com
-  needs:
-    - upload-pkg
   only:
     - tags
