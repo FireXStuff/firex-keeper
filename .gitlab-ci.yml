@@ -81,7 +81,7 @@ upload-pkg:
   only:
     - tags
     
- update-docs:
+update-docs:
   inherit:
     default: false
   stage: update-docs
