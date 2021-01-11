@@ -80,3 +80,17 @@ upload-pkg:
     - firex-build upload_pip
   only:
     - tags
+    
+ update-docs:
+  inherit:
+    default: false
+  stage: update-docs
+  image: google/cloud-sdk
+  script:
+    - gcloud auth activate-service-account --key-file $GOOGLE_APPLICATION_CREDENTIALS 
+    - gsutil -m rsync -r html gs://www.firexstuff.com/keeper
+  needs:
+    - upload-pkg
+    - build-docs
+  only:
+    - tags
