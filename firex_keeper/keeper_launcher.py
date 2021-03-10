@@ -45,3 +45,7 @@ class FireXKeeperLauncher(TrackingService):
 
     def ready_for_tasks(self, **kwargs) -> bool:
         return os.path.isfile(self.broker_recv_ready_file)
+
+    def get_version(self):
+        import firex_keeper
+        return firex_keeper.__version__
