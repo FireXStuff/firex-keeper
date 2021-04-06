@@ -2,7 +2,8 @@ import logging
 from typing import List
 import os
 
-from firexapp.events.model import TaskColumn, RunStates, FireXTask, is_chain_exception, get_chain_exception_child_uuid
+from firexapp.events.model import TaskColumn, RunStates, FireXTask, is_chain_exception, get_chain_exception_child_uuid, \
+    INCOMPLETE_RUNSTATES
 from firex_keeper.db_model import firex_tasks
 from firex_keeper.persist import get_db_manager, get_db_file_path
 from firex_keeper.keeper_helper import FireXTreeTask
@@ -80,6 +81,10 @@ def failed_tasks(logs_dir, **kwargs) -> List[FireXTask]:
 
 def revoked_tasks(logs_dir, **kwargs) -> List[FireXTask]:
     return _query_tasks(logs_dir, _task_col_eq(TaskColumn.STATE, RunStates.REVOKED.value), **kwargs)
+
+
+def running_tasks(logs_dir, **kwargs) -> List[FireXTask]:
+    return _query_tasks(logs_dir, firex_tasks.c[TaskColumn.STATE.value].in_(INCOMPLETE_RUNSTATES), **kwargs)
 
 
 def _child_ids_by_parent_id(tasks_by_uuid):

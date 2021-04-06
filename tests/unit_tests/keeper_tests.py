@@ -167,6 +167,18 @@ class FireXKeeperTests(unittest.TestCase):
             task = task_query.single_task_by_name(logs_dir, 'Noop')
             self.assertEqual(0, task.firex_result)
 
+    def test_query_running(self):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            logs_dir = str(tmpdirname)
+            _write_events_to_db(logs_dir, [
+                {'uuid': '1', 'name': 'run1', 'type': RunStates.STARTED.value},
+                {'uuid': '2', 'name': 'run2', 'type': RunStates.UNBLOCKED.value},
+                {'uuid': '3', 'name': 'done', 'firex_result': 0, 'type': RunStates.FAILED.value},
+            ])
+
+            tasks = task_query.running_tasks(logs_dir)
+            self.assertEqual(2, len(tasks))
+
     def test_task_table_exists(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
             self.assertTrue(create_db_manager(tmpdirname).task_table_exists())
