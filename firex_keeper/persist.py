@@ -44,7 +44,7 @@ def _custom_json_loads(*args, **kwargs):
     return json.loads(*args, **kwargs)
 
 
-def set_sqlite_pragma(engine):
+def set_sqlite_WAL_pragma(engine):
     dbapi_connection = engine.raw_connection()
     try:
         cursor = dbapi_connection.cursor()
@@ -55,6 +55,7 @@ def set_sqlite_pragma(engine):
         dbapi_connection.commit()
     finally:
         dbapi_connection.close()
+
 
 def _db_connection_str(db_file, read_only):
     db_conn_str = 'sqlite:///'
@@ -73,7 +74,10 @@ def connect_db(db_file, read_only=False):
     if create_schema:
         logger.info("Creating schema for %s" % db_file)
         metadata.create_all(engine)
-        set_sqlite_pragma(engine)
+        #  WAL should not be used while concurrent read+write NFS access is still possible. Once all reads go through
+        #   keeper process for in-progress runs, WAL is likely preferable for in-progress runs, then after the DB
+        #   should be read-only and therefore safe for direct NFS access.
+        # set_sqlite_WAL_pragma(engine)
         logger.info("Schema creation complete for %s" % db_file)
 
     return engine.connect()
