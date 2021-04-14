@@ -7,7 +7,7 @@ from firexapp.common import qualify_firex_bin
 from firexapp.submit.console import setup_console_logging
 
 from firex_keeper.keeper_helper import get_keeper_dir
-
+from firexapp.discovery import PkgVersionInfo
 
 logger = setup_console_logging(__name__)
 
@@ -49,3 +49,9 @@ class FireXKeeperLauncher(TrackingService):
     def get_version(self):
         import firex_keeper
         return firex_keeper.__version__
+
+    def get_pkg_version_info(self) -> PkgVersionInfo:
+        import firex_keeper
+        return PkgVersionInfo(pkg=firex_keeper.__package__,
+                              version=firex_keeper.__version__,
+                              commit=firex_keeper._version.get_versions()['full-revisionid'])
