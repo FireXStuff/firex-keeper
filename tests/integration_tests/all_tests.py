@@ -2,9 +2,10 @@ import os
 
 from firexapp.engine.celery import app
 from firexapp.submit.submit import get_log_dir_from_output
-from firexapp.testing.config_base import FlowTestConfiguration, assert_is_good_run
+from firexapp.testing.config_base import FlowTestConfiguration, assert_is_good_run, assert_is_bad_run
 from firexapp.events.model import RunStates
 from firexapp.common import wait_until
+from firexkit.task import FireXTask
 
 from firex_keeper import task_query
 from firex_keeper.persist import get_db_manager, task_by_uuid_exp
@@ -74,3 +75,41 @@ class CompleteTest(FlowTestConfiguration):
 
     def assert_expected_return_code(self, ret_value):
         assert_is_good_run(ret_value)
+
+@app.task(bind=True)
+def FailByGrandchild(self: FireXTask):
+    self.enqueue_child_and_get_results(FailByChild.s())
+
+
+@app.task(bind=True)
+def FailByChild(self: FireXTask):
+    self.enqueue_child_and_get_results(Fail.s())
+
+
+@app.task(bind=True)
+def Fail(self: FireXTask):
+    raise Exception("failing")
+
+
+class CausingFailureTest(FlowTestConfiguration):
+
+    def initial_firex_options(self) -> list:
+        return ["submit", "--chain", "FailByGrandchild"]
+
+    def assert_expected_firex_output(self, cmd_output, cmd_err):
+        logs_dir = get_log_dir_from_output(cmd_output)
+        keeper_complete = task_query.wait_on_keeper_complete(logs_dir)
+        assert keeper_complete, "Keeper database is not complete."
+
+        failed_by_grandchild = task_query.single_task_by_name(logs_dir, FailByGrandchild.__name__)
+        failed_by_child = task_query.single_task_by_name(logs_dir, FailByChild.__name__)
+        failed_by_self = task_query.single_task_by_name(logs_dir, Fail.__name__)
+
+        assert failed_by_grandchild.exception_cause_uuid == failed_by_self.uuid, \
+        f"{failed_by_grandchild} should have been failed by {failed_by_self}"
+
+        assert failed_by_child.exception_cause_uuid == failed_by_self.uuid, \
+        f"{failed_by_child} should have been failed by {failed_by_self}"
+
+    def assert_expected_return_code(self, ret_value):
+        assert_is_bad_run(ret_value)

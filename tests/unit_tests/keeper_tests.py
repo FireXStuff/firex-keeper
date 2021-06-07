@@ -18,8 +18,7 @@ def _write_events_to_db(logs_dir, events):
 
 
 def chain_exception_str(uuid):
-    return ChainInterruptedException.__name__ + "('[%s]',)" % uuid
-
+    return ChainInterruptedException(task_id=uuid).__repr__()
 
 tree_events = [
     #           1
