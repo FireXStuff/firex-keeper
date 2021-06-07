@@ -43,7 +43,7 @@ COLS_TO_SQLALCHEMY_CONFIG = {
     TaskColumn.UTCOFFSET: {'kwargs': {'type_': Integer, 'default': None}},
     TaskColumn.EXCEPTION: {'kwargs': {'type_': String(EXCEPTION_LEN), 'default': None}},
     TaskColumn.TRACEBACK: {'kwargs': {'type_': Text, 'default': None}},
-    TaskColumn.EXCEPTION_CAUSE_UUID: {'kwargs': {'type_': String(UUID_LEN), 'default': None}},
+    # TaskColumn.EXCEPTION_CAUSE_UUID: {'kwargs': {'type_': String(UUID_LEN), 'default': None}},
 }
 
 # Note SQL columns must be in same order as FireXTask namedtuple fields in order to create FireXTasks from query
@@ -51,7 +51,8 @@ COLS_TO_SQLALCHEMY_CONFIG = {
 TASK_COLUMNS = [Column(tc.value,
                        *COLS_TO_SQLALCHEMY_CONFIG[tc].get('args', []),
                        **COLS_TO_SQLALCHEMY_CONFIG[tc]['kwargs'])
-                for tc in TaskColumn]
+                for tc in TaskColumn
+                if tc in COLS_TO_SQLALCHEMY_CONFIG]
 
 TASKS_TABLENAME = 'firex_tasks'
 firex_tasks = Table(TASKS_TABLENAME, metadata, *TASK_COLUMNS)
