@@ -29,12 +29,16 @@ class TaskDatabaseAggregatorThread(BrokerEventConsumerThread):
     def _is_root_complete(self):
         return self.event_aggregator.is_root_complete()
 
+    def _all_tasks_complete(self):
+        return self.event_aggregator.are_all_tasks_complete()
+
     def _on_celery_event(self, event):
         new_task_data_by_uuid = self.event_aggregator.aggregate_events([event])
         self.run_db_manager.insert_or_update_tasks(new_task_data_by_uuid,
                                                    self.event_aggregator.root_uuid)
 
-
     def _on_cleanup(self):
+        for e in self.event_aggregator.generate_incomplete_events():
+            self._on_celery_event(e)
         self.run_db_manager.set_keeper_complete()
         self.run_db_manager.close()
