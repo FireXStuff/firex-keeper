@@ -217,7 +217,7 @@ def wait_on_db_file_query_ready(logs_dir, timeout=15, db_manager=None):
             return _wait_task_table_exist(db_manager, timeout)
 
 
-def wait_on_keeper_complete(logs_dir, timeout=15) -> bool:
+def wait_on_keeper_complete(logs_dir, timeout=30) -> bool:
     # FIXME: subtract time spent waiting on query ready and schema before waiting on DB state.
     db_file_query_ready = wait_on_db_file_query_ready(logs_dir, timeout=timeout)
     if not db_file_query_ready:
