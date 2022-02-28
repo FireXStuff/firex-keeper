@@ -223,4 +223,4 @@ def wait_on_keeper_complete(logs_dir, timeout=30) -> bool:
     if not db_file_query_ready:
         return db_file_query_ready
     with get_db_manager(logs_dir, read_only=True) as db_manager:
-        return wait_until(db_manager.is_keeper_complete, timeout=timeout, sleep_for=0.5)
+        return wait_until(db_manager.is_keeper_complete, timeout=timeout, sleep_for=1)
