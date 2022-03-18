@@ -68,12 +68,12 @@ def _db_connection_str(db_file, read_only):
     return db_conn_str
 
 
-def connect_db(db_file, read_only=False):
+def connect_db(db_file, read_only=False, metadata_to_create=metadata):
     create_schema = not os.path.exists(db_file)
     engine = create_engine(_db_connection_str(db_file, read_only), json_deserializer=_custom_json_loads)
     if create_schema:
         logger.info("Creating schema for %s" % db_file)
-        metadata.create_all(engine)
+        metadata_to_create.create_all(engine)
         #  WAL should not be used while concurrent read+write NFS access is still possible. Once all reads go through
         #   keeper process for in-progress runs, WAL is likely preferable for in-progress runs, then after the DB
         #   should be read-only and therefore safe for direct NFS access.
