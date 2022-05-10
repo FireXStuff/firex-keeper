@@ -26,6 +26,8 @@ class TaskDatabaseAggregatorThread(BrokerEventConsumerThread):
         # Root UUID is not available during initialization. Populated by first task event from celery.
         self.run_db_manager.insert_run_metadata(run_metadata)
 
+        self._event_count = 0
+
     def _is_root_complete(self):
         return self.event_aggregator.is_root_complete()
 
@@ -36,6 +38,11 @@ class TaskDatabaseAggregatorThread(BrokerEventConsumerThread):
         new_task_data_by_uuid = self.event_aggregator.aggregate_events([event])
         self.run_db_manager.insert_or_update_tasks(new_task_data_by_uuid,
                                                    self.event_aggregator.root_uuid)
+
+        # A run can easily have 10,000+ events, so only log every so often.
+        if self._event_count % 100 == 0:
+            logger.debug(f'Received Celery event number {self._event_count} with task uuids: {list(new_task_data_by_uuid.keys())}')
+        self._event_count += 1
 
     def _on_cleanup(self):
         for e in self.event_aggregator.generate_incomplete_events():
