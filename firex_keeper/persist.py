@@ -133,18 +133,19 @@ class FireXRunDbManager:
         self.db_conn.execute(firex_run_metadata.update().values(keeper_complete=True))
 
     def insert_or_update_tasks(self, new_task_data_by_uuid, root_uuid):
-        for uuid, new_task_data in new_task_data_by_uuid.items():
-            persisted_keys_new_task_data = get_task_data(new_task_data)
-            if persisted_keys_new_task_data:
-                # The UUID is only changed for the very first event for that UUID, by definition.
-                is_uuid_new = 'uuid' in persisted_keys_new_task_data
-                if is_uuid_new:
-                    self._insert_task(persisted_keys_new_task_data)
-                    if uuid == root_uuid:
-                        self._set_root_uuid(uuid)
-                else:
-                    # The UUID hasn't changed, but it's still needed to do the update since it's the task primary key.
-                    self._update_task(uuid, persisted_keys_new_task_data)
+        with self.db_conn.begin():
+            for uuid, new_task_data in new_task_data_by_uuid.items():
+                persisted_keys_new_task_data = get_task_data(new_task_data)
+                if persisted_keys_new_task_data:
+                    # The UUID is only changed for the very first event for that UUID, by definition.
+                    is_uuid_new = 'uuid' in persisted_keys_new_task_data
+                    if is_uuid_new:
+                        self._insert_task(persisted_keys_new_task_data)
+                        if uuid == root_uuid:
+                            self._set_root_uuid(uuid)
+                    else:
+                        # The UUID hasn't changed, but it's still needed to do the update since it's the task primary key.
+                        self._update_task(uuid, persisted_keys_new_task_data)
 
     def _insert_task(self, task) -> None:
         self.db_conn.execute(firex_tasks.insert().values(**task))
