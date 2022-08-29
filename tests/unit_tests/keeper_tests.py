@@ -147,14 +147,17 @@ class FireXKeeperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdirname:
             logs_dir = str(tmpdirname)
 
-            aggregator = _write_events_to_db(logs_dir, [
-                {'uuid': '1', 'name': 'Noop', 'type': RunStates.STARTED.value},
-                {'uuid': '2', 'name': 'Noop'},
-            ], cleanup=False)
+            aggregator = _write_events_to_db(
+                logs_dir,
+                [
+                    {'uuid': '1', 'name': 'Noop', 'type': RunStates.STARTED.value},
+                    {'uuid': '2', 'name': 'Noop'},
+                ],
+                cleanup=False)
 
             # Make sure that task 1 is not yet complete
-            self.assertRaises(FireXWaitQueryExceeded, task_query.tasks_by_name, logs_dir, 'Noop',
-                              wait_for_exp_exist=task_uuid_complete_exp('1'), max_wait=1, error_on_wait_exceeded=True)
+            # self.assertRaises(FireXWaitQueryExceeded, task_query.tasks_by_name, logs_dir, 'Noop',
+            #                   wait_for_exp_exist=task_uuid_complete_exp('1'), max_wait=1, error_on_wait_exceeded=True)
 
             # complete the task
             aggregator._on_celery_event({'uuid': '1', 'type': RunStates.FAILED.value})
