@@ -5,7 +5,7 @@ import os
 from firexapp.events.model import TaskColumn, RunStates, FireXTask, is_chain_exception, get_chain_exception_child_uuid, \
     INCOMPLETE_RUNSTATES
 from firex_keeper.db_model import firex_tasks
-from firex_keeper.persist import get_db_manager, get_db_file_path
+from firex_keeper.persist import get_db_manager, get_db_file_path, task_by_uuid_exp
 from firex_keeper.keeper_helper import FireXTreeTask
 from firexapp.common import wait_until
 
@@ -58,8 +58,16 @@ def single_task_by_name(logs_dir, name, **kwargs) -> FireXTask:
     return tasks[0]
 
 
-def task_by_uuid(logs_dir, uuid, **kwargs) -> FireXTask:
-    tasks = _query_tasks(logs_dir, _task_col_eq(TaskColumn.UUID, uuid), **kwargs)
+def task_by_uuid(logs_dir, uuid, wait_for_exp_exist=None, max_wait=3, **kwargs) -> FireXTask:
+    if wait_for_exp_exist is None:
+        wait_for_exp_exist=task_by_uuid_exp(uuid)
+
+    tasks = _query_tasks(
+        logs_dir,
+        _task_col_eq(TaskColumn.UUID, uuid),
+        wait_for_exp_exist=wait_for_exp_exist,
+        max_wait=max_wait,
+        **kwargs)
     if not tasks:
         raise FireXTaskQueryException("Found no task with UUID %s" % uuid)
     return tasks[0]

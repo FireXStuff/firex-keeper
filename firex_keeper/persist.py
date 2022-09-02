@@ -171,12 +171,16 @@ class FireXRunDbManager:
         return self.db_conn.execute(query).scalar() is not None
 
     def wait_before_query(self, whereclause, max_wait, error_on_wait_exceeded):
-        start_wait_time = perf_counter()
-        exists = wait_until(self.does_task_whereclause_exist, max_wait, 0.5, whereclause)
-        wait_duration = perf_counter() - start_wait_time
-        logger.debug("Keeper query waited %.2f secs for wait query to exist." % wait_duration)
+        if not self.is_keeper_complete():
+            start_wait_time = perf_counter()
+            exists = wait_until(self.does_task_whereclause_exist, max_wait, 0.5, whereclause)
+            wait_duration = perf_counter() - start_wait_time
+            logger.debug("Keeper query waited %.2f secs for wait query to exist." % wait_duration)
+        else:
+            exists = self.does_task_whereclause_exist(whereclause)
+
         if not exists:
-            msg = "Wait exceeded %d seconds for %s to exist, but it still does not." % (max_wait, whereclause)
+            msg = f"Wait exceeded {max_wait} seconds for {whereclause} to exist, but it still does not."
             if error_on_wait_exceeded:
                 raise FireXWaitQueryExceeded(msg)
             else:
