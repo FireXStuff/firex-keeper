@@ -39,7 +39,7 @@ tree_events = [
 
 class FireXKeeperTests(unittest.TestCase):
 
-    def test_query_by_name(self):
+    def test_query_by_name_and_uuid(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
             logs_dir = str(tmpdirname)
             _write_events_to_db(logs_dir, [
@@ -51,6 +51,9 @@ class FireXKeeperTests(unittest.TestCase):
             tasks = task_query.tasks_by_name(logs_dir, 'Noop')
             self.assertEqual(2, len(tasks))
             self.assertEqual('Noop', tasks[0].name)
+
+            other_task = task_query.task_by_uuid(logs_dir, '3')
+            self.assertEqual('Other', other_task.name)
 
     def test_query_all(self):
         with tempfile.TemporaryDirectory() as tmpdirname:

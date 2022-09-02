@@ -34,11 +34,9 @@ def _drain_queue(q):
     return items
 
 
-def write_events_from_queue(celery_event_queue, run_metadata, event_aggregator, sleep_after_events=2):
+def write_events_from_queue(celery_event_queue, logs_dir, event_aggregator, sleep_after_events=2):
     written_celery_event_count = 0
-    with get_db_manager(run_metadata.logs_dir) as run_db_manager:
-        # Root UUID is not available during initialization. Populated by first task event from celery.
-        run_db_manager.insert_run_metadata(run_metadata)
+    with get_db_manager(logs_dir) as run_db_manager:
         while True:
             # wait indefinitely for next item, either celery event or "stop" control signal.
             queue_item = celery_event_queue.get()
@@ -90,12 +88,15 @@ class TaskDatabaseAggregatorThread(BrokerEventConsumerThread):
 
         # Create DB file here so that it can be accessed immediately after this constructor completes.
         # All record writing occurs in a different thread.
-        create_db_manager(run_metadata.logs_dir)
+        run_db_manager = create_db_manager(run_metadata.logs_dir)
+        # Root UUID is not available during initialization. Populated by first task event from celery.
+        run_db_manager.insert_run_metadata(run_metadata)
+        run_db_manager.close()
 
         self.celery_event_queue = queue.Queue()
         self.writing_thread = threading.Thread(
             target=write_events_from_queue,
-            args=[self.celery_event_queue, run_metadata, self.event_aggregator],
+            args=[self.celery_event_queue, run_metadata.logs_dir, self.event_aggregator],
         )
         self.writing_thread.start()
         self._event_count = 0
