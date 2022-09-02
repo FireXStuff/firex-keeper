@@ -11,6 +11,7 @@ from time import sleep
 from firexapp.events.broker_event_consumer import BrokerEventConsumerThread
 from firexapp.events.event_aggregator import FireXEventAggregator
 from firexapp.events.model import FireXRunMetadata
+import sqlalchemy.exc
 
 from firex_keeper.persist import create_db_manager, get_db_manager
 
@@ -23,32 +24,45 @@ class KeeperQueueEntryType(Enum):
     STOP = auto()
 
 
-def write_events_from_queue(celery_event_queue, run_metadata, event_aggregator, sleep_after_events=2):
+def _drain_queue(q):
+    items = []
+    for _ in range(q.qsize()):
+        try:
+            items.append(q.get_nowait())
+        except queue.Empty:
+            pass
+    return items
 
+
+def write_events_from_queue(celery_event_queue, run_metadata, event_aggregator, sleep_after_events=2):
+    written_celery_event_count = 0
     with get_db_manager(run_metadata.logs_dir) as run_db_manager:
         # Root UUID is not available during initialization. Populated by first task event from celery.
         run_db_manager.insert_run_metadata(run_metadata)
         while True:
-            queue_entry_type, maybe_celery_event = celery_event_queue.get()
-            queue_items = [(queue_entry_type, maybe_celery_event)]
+            # wait indefinitely for next item, either celery event or "stop" control signal.
+            queue_item = celery_event_queue.get()
 
             # drain queue to group events in to single DB write.
-            for _ in range(celery_event_queue.qsize()):
-                try:
-                    queue_items.append(
-                        celery_event_queue.get_nowait()
-                    )
-                except queue.Empty:
-                    pass
+            queue_items = [queue_item] + _drain_queue(celery_event_queue)
 
             celery_events = [i[1] for i in queue_items if i[0] == KeeperQueueEntryType.CELERY_EVENT]
             if celery_events:
-                new_task_data_by_uuid = event_aggregator.aggregate_events(
-                    celery_events,
-                )
-                run_db_manager.insert_or_update_tasks(
-                    new_task_data_by_uuid, event_aggregator.root_uuid,
-                )
+                new_task_data_by_uuid = event_aggregator.aggregate_events(celery_events)
+                try:
+                    run_db_manager.insert_or_update_tasks(
+                        new_task_data_by_uuid, event_aggregator.root_uuid,
+                    )
+                except sqlalchemy.exc.OperationalError as e:
+                    logger.exception(e)
+                else:
+                    # log DB write progress, similar to Celery event receive progress logging.
+                    for e in celery_events:
+                        if written_celery_event_count % 100 == 0:
+                            logger.debug(
+                                'Updated Keeper DB with Celery event number '
+                                f'{written_celery_event_count} with task uuid: {e.get("uuid")}')
+                        written_celery_event_count += 1
 
             for _ in range(len(queue_items)):
                 celery_event_queue.task_done()
@@ -96,8 +110,6 @@ class TaskDatabaseAggregatorThread(BrokerEventConsumerThread):
         self.celery_event_queue.put(
             (KeeperQueueEntryType.CELERY_EVENT, event),
         )
-
-        # A run can easily have 10,000+ events, so only log every so often.
         if self._event_count % 100 == 0:
             logger.debug(f'Received Celery event number {self._event_count} with task uuid: {event.get("uuid")}')
         self._event_count += 1

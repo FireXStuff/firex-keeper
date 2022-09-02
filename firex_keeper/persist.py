@@ -57,20 +57,33 @@ def set_sqlite_WAL_pragma(engine):
         dbapi_connection.close()
 
 
-def _db_connection_str(db_file, read_only):
+def _db_connection_str(db_file, read_only, dotfile_locking=True):
     db_conn_str = 'sqlite:///'
     if read_only:
         db_conn_str += 'file:'
 
     db_conn_str += db_file
+    params = {}
     if read_only:
-        db_conn_str += '?mode=ro&uri=true'
+        params['mode'] = 'ro'
+        params['uri'] = 'true'
+
+    if dotfile_locking:
+        params['vfs'] = 'unix-dotfile'
+
+    if params:
+         db_conn_str += '?' + '&'.join(
+            [f'{k}={v}' for k, v in params.items()]
+         )
+
     return db_conn_str
 
 
 def connect_db(db_file, read_only=False, metadata_to_create=metadata):
     create_schema = not os.path.exists(db_file)
-    engine = create_engine(_db_connection_str(db_file, read_only), json_deserializer=_custom_json_loads)
+    engine = create_engine(
+        _db_connection_str(db_file, read_only),
+        json_deserializer=_custom_json_loads)
     if create_schema:
         logger.info("Creating schema for %s" % db_file)
         metadata_to_create.create_all(engine)
