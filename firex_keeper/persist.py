@@ -68,8 +68,9 @@ def _db_connection_str(db_file, read_only, dotfile_locking=True):
         params['mode'] = 'ro'
         params['uri'] = 'true'
 
-    if dotfile_locking:
-        params['vfs'] = 'unix-dotfile'
+    # need solution of no-write UT.
+    # if dotfile_locking:
+    #     params['vfs'] = 'unix-dotfile'
 
     if params:
          db_conn_str += '?' + '&'.join(
