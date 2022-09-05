@@ -5,6 +5,7 @@ from collections import namedtuple
 import gzip
 import json
 import os
+import stat
 
 from firexapp.submit.uid import Uid
 from firexapp.events.event_aggregator import FireXEventAggregator
@@ -36,3 +37,8 @@ def load_event_file(db_manager, event_file):
         new_task_data_by_uuid = event_aggregator.aggregate_events([event])
         db_manager.insert_or_update_tasks(new_task_data_by_uuid,
                                           event_aggregator.root_uuid)
+
+
+def can_any_write(file_path):
+    any_read = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
+    return bool(os.stat(file_path).st_mode & any_read)

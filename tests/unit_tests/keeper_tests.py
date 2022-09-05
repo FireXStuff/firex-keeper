@@ -4,8 +4,9 @@ import tempfile
 from firexkit.result import ChainInterruptedException
 from firexapp.events.model import RunStates, FireXRunMetadata
 from firex_keeper.keeper_event_consumer import TaskDatabaseAggregatorThread
-from firex_keeper.persist import task_by_uuid_exp, task_uuid_complete_exp, FireXWaitQueryExceeded, create_db_manager
+from firex_keeper.persist import task_by_uuid_exp, task_uuid_complete_exp, FireXWaitQueryExceeded, create_db_manager, get_db_file
 from firex_keeper import task_query
+from firex_keeper.keeper_helper import can_any_write
 
 
 
@@ -157,6 +158,7 @@ class FireXKeeperTests(unittest.TestCase):
                     {'uuid': '2', 'name': 'Noop'},
                 ],
                 cleanup=False)
+            self.assertTrue(can_any_write(get_db_file(logs_dir)))
 
             # Make sure that task 1 is not yet complete
             # self.assertRaises(FireXWaitQueryExceeded, task_query.tasks_by_name, logs_dir, 'Noop',
@@ -171,6 +173,11 @@ class FireXKeeperTests(unittest.TestCase):
             self.assertEqual(2, len(tasks))
 
             aggregator._on_cleanup()
+
+            # Verify that after a run is complete, the DB is no longer writeable.
+            # Enable after verifying this doesn't harm cleanup.
+            # self.assertFalse(can_any_write(get_db_file(logs_dir)))
+
 
     def test_int_in_json_column(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
@@ -201,6 +208,6 @@ class FireXKeeperTests(unittest.TestCase):
         from sqlalchemy import create_engine
 
         with tempfile.NamedTemporaryFile() as db_file:
-            engine = create_engine(_db_connection_str(db_file.name, False))
+            engine = create_engine(_db_connection_str(db_file.name, read_only=False))
             db_manager = FireXRunDbManager(engine.connect())
             self.assertFalse(db_manager.task_table_exists())

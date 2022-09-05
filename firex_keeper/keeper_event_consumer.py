@@ -7,13 +7,16 @@ import logging
 import queue
 import threading
 from time import sleep
+import os
+import stat
+from pathlib import Path
 
 from firexapp.events.broker_event_consumer import BrokerEventConsumerThread
 from firexapp.events.event_aggregator import FireXEventAggregator
 from firexapp.events.model import FireXRunMetadata
 import sqlalchemy.exc
 
-from firex_keeper.persist import create_db_manager, get_db_manager
+from firex_keeper.persist import create_db_manager, get_db_manager, get_db_file, get_keeper_complete_file_path
 
 
 logger = logging.getLogger(__name__)
@@ -32,6 +35,11 @@ def _drain_queue(q):
         except queue.Empty:
             pass
     return items
+
+
+def _remove_write_permissions(file_path: str) -> None:
+    disable_each_write = ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH
+    os.chmod(file_path, os.stat(file_path).st_mode & disable_each_write)
 
 
 def write_events_from_queue(celery_event_queue, logs_dir, event_aggregator, sleep_after_events=2):
@@ -76,6 +84,10 @@ def write_events_from_queue(celery_event_queue, logs_dir, event_aggregator, slee
 
         run_db_manager.set_keeper_complete()
 
+    # TODO: confirm this won't affect cleanup operations.
+    # _remove_write_permissions(get_db_file(logs_dir, new=False))
+    Path(get_keeper_complete_file_path(logs_dir)).touch()
+
 
 class TaskDatabaseAggregatorThread(BrokerEventConsumerThread):
     """Captures Celery events and stores the FireX datamodel in an SQLite DB."""
@@ -87,7 +99,7 @@ class TaskDatabaseAggregatorThread(BrokerEventConsumerThread):
         self.event_aggregator = FireXEventAggregator()
 
         # Create DB file here so that it can be accessed immediately after this constructor completes.
-        # All record writing occurs in a different thread.
+        # All task record writing occurs in the writing_thread.
         run_db_manager = create_db_manager(run_metadata.logs_dir)
         # Root UUID is not available during initialization. Populated by first task event from celery.
         run_db_manager.insert_run_metadata(run_metadata)

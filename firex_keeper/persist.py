@@ -12,6 +12,7 @@ from sqlalchemy.sql import select, and_
 from firexapp.events.model import FireXTask, FireXRunMetadata, get_task_data, COMPLETE_RUNSTATES
 from firexapp.common import wait_until
 from firex_keeper.db_model import metadata, firex_run_metadata, firex_tasks, TASKS_TABLENAME
+from firex_keeper.keeper_helper import can_any_write
 
 logger = logging.getLogger(__name__)
 
@@ -57,35 +58,35 @@ def set_sqlite_WAL_pragma(engine):
         dbapi_connection.close()
 
 
-def _db_connection_str(db_file, read_only, dotfile_locking=True):
-    db_conn_str = 'sqlite:///'
-    if read_only:
-        db_conn_str += 'file:'
+def _db_connection_str(db_file, read_only, dotfile_locking=True, is_run_complete=False):
+    db_conn_str = f'sqlite:///file:{db_file}'
 
-    db_conn_str += db_file
-    params = {}
+    params = {'uri': 'true'}
+
+    if is_run_complete:
+        params['immutable'] = '1'
+        read_only = True
+
     if read_only:
         params['mode'] = 'ro'
-        params['uri'] = 'true'
 
-    # need solution of no-write UT.
-    # if dotfile_locking:
-    #     params['vfs'] = 'unix-dotfile'
+    if dotfile_locking:
+        params['vfs'] = 'unix-dotfile'
 
-    if params:
-         db_conn_str += '?' + '&'.join(
-            [f'{k}={v}' for k, v in params.items()]
-         )
+    db_conn_str += '?' + '&'.join(
+        [f'{k}={v}' for k, v in params.items()]
+    )
 
     return db_conn_str
 
 
-def connect_db(db_file, read_only=False, metadata_to_create=metadata):
-    create_schema = not os.path.exists(db_file)
+def connect_db(db_file, read_only=False, metadata_to_create=metadata, is_run_complete=False):
     engine = create_engine(
-        _db_connection_str(db_file, read_only),
-        json_deserializer=_custom_json_loads)
-    if create_schema:
+        _db_connection_str(db_file, read_only, is_run_complete),
+        json_deserializer=_custom_json_loads,
+    )
+
+    if not os.path.exists(db_file):
         logger.info("Creating schema for %s" % db_file)
         metadata_to_create.create_all(engine)
         #  WAL should not be used while concurrent read+write NFS access is still possible. Once all reads go through
@@ -97,8 +98,23 @@ def connect_db(db_file, read_only=False, metadata_to_create=metadata):
     return engine.connect()
 
 
+def get_db_file_dir_path(logs_dir):
+    return os.path.join(logs_dir, Uid.debug_dirname, 'keeper')
+
+
 def get_db_file_path(logs_dir):
-    return os.path.join(logs_dir, Uid.debug_dirname, 'keeper', 'firex_run.db')
+    return os.path.join(get_db_file_dir_path(logs_dir), 'firex_run.db')
+
+
+def get_keeper_complete_file_path(logs_dir):
+    # A way for checking if the keeper DB is complete without inspecting the DB
+    # file. This can be used to inform connection decisions, like if the DB
+    # is not expected to change.
+    return os.path.join(get_db_file_dir_path(logs_dir), '.keeper_complete')
+
+
+def is_keeper_db_complete(logs_dir):
+    return os.path.isfile(get_keeper_complete_file_path(logs_dir))
 
 
 def get_db_file(logs_dir, new=False):
@@ -108,7 +124,7 @@ def get_db_file(logs_dir, new=False):
         db_file_parent = os.path.dirname(db_file)
         os.makedirs(db_file_parent, exist_ok=True)
     else:
-        assert os.path.exists(db_file), "DB file does not exist: %s" % db_file
+        assert os.path.isfile(db_file), f"DB file does not exist: {db_file}"
     return db_file
 
 
@@ -120,7 +136,12 @@ def create_db_manager(logs_dir):
 
 @contextmanager
 def get_db_manager(logs_dir, read_only=False):
-    db_manager = FireXRunDbManager(connect_db(get_db_file(logs_dir, new=False), read_only=read_only))
+    "Get a DB manager for an existing keeper DB file."
+
+    db_file = get_db_file(logs_dir, new=False)
+    is_run_complete = is_keeper_db_complete(logs_dir)
+    conn = connect_db(db_file, read_only=read_only, is_run_complete=is_run_complete)
+    db_manager = FireXRunDbManager(conn)
     try:
         yield db_manager
     finally:
