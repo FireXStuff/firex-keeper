@@ -5,7 +5,7 @@ import os
 from firexapp.events.model import TaskColumn, RunStates, FireXTask, is_chain_exception, get_chain_exception_child_uuid, \
     INCOMPLETE_RUNSTATES
 from firex_keeper.db_model import firex_tasks
-from firex_keeper.persist import get_db_manager, get_db_file_path, task_by_uuid_exp
+from firex_keeper.persist import get_db_manager, get_db_file_path, task_by_uuid_exp, get_keeper_complete_file_path
 from firex_keeper.keeper_helper import FireXTreeTask
 from firexapp.common import wait_until
 
@@ -226,9 +226,4 @@ def wait_on_db_file_query_ready(logs_dir, timeout=15, db_manager=None):
 
 
 def wait_on_keeper_complete(logs_dir, timeout=30) -> bool:
-    # FIXME: subtract time spent waiting on query ready and schema before waiting on DB state.
-    db_file_query_ready = wait_on_db_file_query_ready(logs_dir, timeout=timeout)
-    if not db_file_query_ready:
-        return db_file_query_ready
-    with get_db_manager(logs_dir, read_only=True) as db_manager:
-        return wait_until(db_manager.is_keeper_complete, timeout=timeout, sleep_for=1)
+    return wait_until(os.path.isfile, timeout, 1, get_keeper_complete_file_path(logs_dir))

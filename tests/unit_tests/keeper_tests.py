@@ -1,13 +1,19 @@
 import unittest
 import tempfile
+import os
+import stat
+from pathlib import Path
 
 from firexkit.result import ChainInterruptedException
 from firexapp.events.model import RunStates, FireXRunMetadata
 from firex_keeper.keeper_event_consumer import TaskDatabaseAggregatorThread
-from firex_keeper.persist import task_by_uuid_exp, task_uuid_complete_exp, FireXWaitQueryExceeded, create_db_manager, get_db_file
+from firex_keeper.persist import (
+    task_by_uuid_exp, task_uuid_complete_exp, FireXWaitQueryExceeded, create_db_manager,
+    get_db_file, get_db_manager, get_keeper_complete_file_path)
 from firex_keeper import task_query
 from firex_keeper.keeper_helper import can_any_write
 
+from sqlalchemy.exc import OperationalError
 
 
 def _write_events_to_db(logs_dir, events, cleanup=True):
@@ -175,9 +181,8 @@ class FireXKeeperTests(unittest.TestCase):
             aggregator._on_cleanup()
 
             # Verify that after a run is complete, the DB is no longer writeable.
-            # Enable after verifying this doesn't harm cleanup.
+            # TODO: Enable after verifying this doesn't harm cleanup.
             # self.assertFalse(can_any_write(get_db_file(logs_dir)))
-
 
     def test_int_in_json_column(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
@@ -201,7 +206,29 @@ class FireXKeeperTests(unittest.TestCase):
 
     def test_task_table_exists(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
-            self.assertTrue(create_db_manager(tmpdirname).task_table_exists())
+            db_mgr = create_db_manager(tmpdirname)
+            self.assertTrue(db_mgr.task_table_exists())
+
+            db_dir = os.path.dirname(get_db_file(tmpdirname))
+            orig_db_dir_mode = os.stat(db_dir).st_mode
+            # Make dir not writeable
+            os.chmod(db_dir, orig_db_dir_mode & ~stat.S_IWUSR)
+
+            # expect dotfile locking to fail
+            self.assertRaises(OperationalError, db_mgr.task_table_exists)
+
+            # Restore write permissions.
+            os.chmod(db_dir, orig_db_dir_mode)
+            db_mgr.close()
+
+            # expect keeper complete to cause no-locking DB access,
+            # so reads should work despite the dir being non-writeable.
+            Path(get_keeper_complete_file_path(tmpdirname)).touch()
+
+            # re-disable-write.
+            os.chmod(db_dir, orig_db_dir_mode & ~stat.S_IWUSR)
+            with get_db_manager(tmpdirname) as db_mgr:
+                self.assertTrue(db_mgr.task_table_exists())
 
     def test_task_table_not_exists(self):
         from firex_keeper.persist import _db_connection_str, FireXRunDbManager

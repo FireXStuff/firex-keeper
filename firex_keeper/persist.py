@@ -58,7 +58,7 @@ def set_sqlite_WAL_pragma(engine):
         dbapi_connection.close()
 
 
-def _db_connection_str(db_file, read_only, dotfile_locking=True, is_run_complete=False):
+def _db_connection_str(db_file, read_only, is_run_complete=False):
     db_conn_str = f'sqlite:///file:{db_file}'
 
     params = {'uri': 'true'}
@@ -66,6 +66,9 @@ def _db_connection_str(db_file, read_only, dotfile_locking=True, is_run_complete
     if is_run_complete:
         params['immutable'] = '1'
         read_only = True
+        dotfile_locking = False
+    else:
+        dotfile_locking = True
 
     if read_only:
         params['mode'] = 'ro'
@@ -82,7 +85,7 @@ def _db_connection_str(db_file, read_only, dotfile_locking=True, is_run_complete
 
 def connect_db(db_file, read_only=False, metadata_to_create=metadata, is_run_complete=False):
     engine = create_engine(
-        _db_connection_str(db_file, read_only, is_run_complete),
+        _db_connection_str(db_file, read_only, is_run_complete=is_run_complete),
         json_deserializer=_custom_json_loads,
     )
 
