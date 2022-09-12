@@ -39,6 +39,11 @@ def load_event_file(db_manager, event_file):
                                           event_aggregator.root_uuid)
 
 
-def can_any_write(file_path):
+def can_any_write(file_path: str) -> bool:
     any_read = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
     return bool(os.stat(file_path).st_mode & any_read)
+
+
+def remove_write_permissions(file_path: str) -> None:
+    disable_each_write = ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH
+    os.chmod(file_path, os.stat(file_path).st_mode & disable_each_write)
