@@ -37,11 +37,6 @@ def _drain_queue(q):
     return items
 
 
-def _remove_write_permissions(file_path: str) -> None:
-    disable_each_write = ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH
-    os.chmod(file_path, os.stat(file_path).st_mode & disable_each_write)
-
-
 def write_events_from_queue(celery_event_queue, logs_dir, event_aggregator, sleep_after_events=2):
     written_celery_event_count = 0
     with get_db_manager(logs_dir) as run_db_manager:

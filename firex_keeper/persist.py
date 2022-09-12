@@ -49,10 +49,14 @@ def set_sqlite_WAL_pragma(engine):
     dbapi_connection = engine.raw_connection()
     try:
         cursor = dbapi_connection.cursor()
-        pragma_cmd = "PRAGMA journal_mode=WAL"
-        cursor.execute(pragma_cmd)
+        pragma_cmds = [
+            "PRAGMA journal_mode=WAL",
+            "PRAGMA synchronous=NORMAL",
+        ]
+        for pragma_cmd in pragma_cmds:
+            logger.info("Executed: " + pragma_cmd)
+            cursor.execute(pragma_cmd)
         cursor.close()
-        logger.info("Executed: " + pragma_cmd)
         dbapi_connection.commit()
     finally:
         dbapi_connection.close()
@@ -66,15 +70,9 @@ def _db_connection_str(db_file, read_only, is_run_complete=False):
     if is_run_complete:
         params['immutable'] = '1'
         read_only = True
-        dotfile_locking = False
-    else:
-        dotfile_locking = True
 
     if read_only:
         params['mode'] = 'ro'
-
-    if dotfile_locking:
-        params['vfs'] = 'unix-dotfile'
 
     db_conn_str += '?' + '&'.join(
         [f'{k}={v}' for k, v in params.items()]
