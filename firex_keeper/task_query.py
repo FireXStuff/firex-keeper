@@ -3,7 +3,7 @@ from typing import List
 import os
 
 from firexapp.events.model import TaskColumn, RunStates, FireXTask, is_chain_exception, get_chain_exception_child_uuid, \
-    INCOMPLETE_RUNSTATES
+    INCOMPLETE_RUNSTATES, is_failed
 from firex_keeper.db_model import firex_tasks
 from firex_keeper.persist import get_db_manager, get_db_file_path, task_by_uuid_exp, get_keeper_complete_file_path
 from firex_keeper.keeper_helper import FireXTreeTask
@@ -68,6 +68,7 @@ def task_by_uuid(logs_dir, uuid, wait_for_exp_exist=None, max_wait=3, **kwargs) 
         wait_for_exp_exist=wait_for_exp_exist,
         max_wait=max_wait,
         **kwargs)
+
     if not tasks:
         raise FireXTaskQueryException("Found no task with UUID %s" % uuid)
     return tasks[0]
@@ -93,6 +94,15 @@ def revoked_tasks(logs_dir, **kwargs) -> List[FireXTask]:
 
 def running_tasks(logs_dir, **kwargs) -> List[FireXTask]:
     return _query_tasks(logs_dir, firex_tasks.c[TaskColumn.STATE.value].in_(INCOMPLETE_RUNSTATES), **kwargs)
+
+
+def failed_by_tasks(logs_dir, failed_uuid: str, **kwargs) -> List[FireXTask]:
+    assert is_failed(task_by_uuid(logs_dir, failed_uuid, **kwargs)), \
+        f'Task {failed_uuid} did not fail.'
+    return _query_tasks(
+        logs_dir,
+        firex_tasks.c[TaskColumn.EXCEPTION_CAUSE_UUID.value] == failed_uuid,
+        **kwargs)
 
 
 def _child_ids_by_parent_id(tasks_by_uuid):

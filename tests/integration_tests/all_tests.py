@@ -111,5 +111,13 @@ class CausingFailureTest(FlowTestConfiguration):
         assert failed_by_child.exception_cause_uuid == failed_by_self.uuid, \
         f"{failed_by_child} should have been failed by {failed_by_self}"
 
+        failed_ancestors = task_query.failed_by_tasks(logs_dir, failed_by_self.uuid)
+        assert len(failed_ancestors) == 2, f'Expected 2 failed ancestors'
+        expected_failed_ancestor_uuids = {failed_by_child.uuid, failed_by_grandchild.uuid}
+        actual_failed_ancestor_uuids = {t.uuid for t in failed_ancestors}
+        assert expected_failed_ancestor_uuids == actual_failed_ancestor_uuids, \
+            f"{expected_failed_ancestor_uuids} != {actual_failed_ancestor_uuids}"
+
+
     def assert_expected_return_code(self, ret_value):
         assert_is_bad_run(ret_value)

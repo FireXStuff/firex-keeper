@@ -12,7 +12,6 @@ from sqlalchemy.sql import select, and_
 from firexapp.events.model import FireXTask, FireXRunMetadata, get_task_data, COMPLETE_RUNSTATES
 from firexapp.common import wait_until
 from firex_keeper.db_model import metadata, firex_run_metadata, firex_tasks, TASKS_TABLENAME
-from firex_keeper.keeper_helper import can_any_write
 
 logger = logging.getLogger(__name__)
 

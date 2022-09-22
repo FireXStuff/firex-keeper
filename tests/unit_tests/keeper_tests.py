@@ -212,6 +212,20 @@ class FireXKeeperTests(unittest.TestCase):
             remove_write_permissions(db_file)
             self.assertTrue(db_mgr.task_table_exists())
 
+    def test_query_by_failed_by(self):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            logs_dir = str(tmpdirname)
+            _write_events_to_db(logs_dir, [
+                {'uuid': '1', 'name': 'Noop',},
+                {'uuid': '2', 'name': 'FailedByChild', 'exception_cause_uuid': '3'},
+                {'uuid': '3', 'name': 'Fail', 'type': RunStates.FAILED.value},
+            ])
+
+            tasks = task_query.failed_by_tasks(logs_dir, '3')
+            self.assertEqual(1, len(tasks))
+            self.assertEqual('FailedByChild', tasks[0].name)
+            self.assertEqual('2', tasks[0].uuid)
+
     def test_task_table_not_exists(self):
         from firex_keeper.persist import _db_connection_str, FireXRunDbManager
         from sqlalchemy import create_engine
