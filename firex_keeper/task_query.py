@@ -97,8 +97,10 @@ def running_tasks(logs_dir, **kwargs) -> List[FireXTask]:
 
 
 def failed_by_tasks(logs_dir, failed_uuid: str, **kwargs) -> List[FireXTask]:
-    assert is_failed(task_by_uuid(logs_dir, failed_uuid, **kwargs)), \
-        f'Task {failed_uuid} did not fail.'
+    # TODO: make this work with copy_before_query without copying twice,
+    # or tune page size to make NFS queries faster.
+    # assert is_failed(task_by_uuid(logs_dir, failed_uuid, **kwargs)), \
+    #     f'Task {failed_uuid} did not fail.'
     return _query_tasks(
         logs_dir,
         firex_tasks.c[TaskColumn.EXCEPTION_CAUSE_UUID.value] == failed_uuid,
