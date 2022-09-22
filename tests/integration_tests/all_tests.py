@@ -36,8 +36,10 @@ class KeepNoopData(FlowTestConfiguration):
         assert run_metadata.firex_id == firex_id
         assert run_metadata.logs_dir == logs_dir
 
-        all_uuids = {t.uuid for t in task_query.all_tasks(logs_dir)}
+        all_tasks = [t for t in task_query.all_tasks(logs_dir)]
+        all_uuids = {t.uuid for t in all_tasks}
         assert run_metadata.root_uuid in all_uuids
+        assert {firex_id} == {t.firex_id for t in all_tasks}
 
     def assert_expected_return_code(self, ret_value):
         assert_is_good_run(ret_value)

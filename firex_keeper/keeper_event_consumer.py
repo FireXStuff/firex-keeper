@@ -16,7 +16,7 @@ from firexapp.events.event_aggregator import FireXEventAggregator
 from firexapp.events.model import FireXRunMetadata
 import sqlalchemy.exc
 
-from firex_keeper.persist import create_db_manager, get_db_manager, get_db_file, get_keeper_complete_file_path
+from firex_keeper.persist import create_db_manager, get_db_manager, get_keeper_complete_file_path
 
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ def _drain_queue(q):
     return items
 
 
-def write_events_from_queue(celery_event_queue, logs_dir, event_aggregator, sleep_after_events=2):
+def write_events_from_queue(celery_event_queue, logs_dir, event_aggregator, firex_id, sleep_after_events=2):
     written_celery_event_count = 0
     with get_db_manager(logs_dir) as run_db_manager:
         while True:
@@ -52,7 +52,9 @@ def write_events_from_queue(celery_event_queue, logs_dir, event_aggregator, slee
                 new_task_data_by_uuid = event_aggregator.aggregate_events(celery_events)
                 try:
                     run_db_manager.insert_or_update_tasks(
-                        new_task_data_by_uuid, event_aggregator.root_uuid,
+                        new_task_data_by_uuid,
+                        event_aggregator.root_uuid,
+                        firex_id,
                     )
                 except sqlalchemy.exc.OperationalError as e:
                     logger.exception(e)
@@ -103,7 +105,7 @@ class TaskDatabaseAggregatorThread(BrokerEventConsumerThread):
         self.celery_event_queue = queue.Queue()
         self.writing_thread = threading.Thread(
             target=write_events_from_queue,
-            args=[self.celery_event_queue, run_metadata.logs_dir, self.event_aggregator],
+            args=[self.celery_event_queue, run_metadata.logs_dir, self.event_aggregator, run_metadata.firex_id],
         )
         self.writing_thread.start()
         self._event_count = 0

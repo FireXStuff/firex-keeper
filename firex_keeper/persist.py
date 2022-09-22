@@ -167,7 +167,7 @@ class FireXRunDbManager:
     def set_keeper_complete(self):
         self.db_conn.execute(firex_run_metadata.update().values(keeper_complete=True))
 
-    def insert_or_update_tasks(self, new_task_data_by_uuid, root_uuid):
+    def insert_or_update_tasks(self, new_task_data_by_uuid, root_uuid, firex_id):
         with self.db_conn.begin():
             for uuid, new_task_data in new_task_data_by_uuid.items():
                 persisted_keys_new_task_data = get_task_data(new_task_data)
@@ -175,6 +175,7 @@ class FireXRunDbManager:
                     # The UUID is only changed for the very first event for that UUID, by definition.
                     is_uuid_new = 'uuid' in persisted_keys_new_task_data
                     if is_uuid_new:
+                        persisted_keys_new_task_data['firex_id'] = firex_id
                         self._insert_task(persisted_keys_new_task_data)
                         if uuid == root_uuid:
                             self._set_root_uuid(uuid)
