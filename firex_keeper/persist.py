@@ -44,17 +44,23 @@ def _custom_json_loads(*args, **kwargs):
     return json.loads(*args, **kwargs)
 
 
-def set_sqlite_WAL_pragma(engine):
+def _get_pragmas(use_wal):
+    pragmas = [ 'page_size = 4096' ]
+    if use_wal:
+        pragmas += [
+            'journal_mode=WAL', 'synchronous=NORMAL',
+        ]
+    return pragmas
+
+
+def execute_pragmas(engine, use_wal=False):
     dbapi_connection = engine.raw_connection()
     try:
         cursor = dbapi_connection.cursor()
-        pragma_cmds = [
-            "PRAGMA journal_mode=WAL",
-            "PRAGMA synchronous=NORMAL",
-        ]
-        for pragma_cmd in pragma_cmds:
-            logger.info("Executed: " + pragma_cmd)
-            cursor.execute(pragma_cmd)
+        for pragma in _get_pragmas(use_wal):
+            cmd = 'PRAGMA ' + pragma
+            logger.debug(f"Executing: {cmd}")
+            cursor.execute(cmd)
         cursor.close()
         dbapi_connection.commit()
     finally:
@@ -87,12 +93,13 @@ def connect_db(db_file, read_only=False, metadata_to_create=metadata, is_run_com
     )
 
     if not os.path.exists(db_file):
-        logger.info("Creating schema for %s" % db_file)
-        metadata_to_create.create_all(engine)
         #  WAL should not be used while concurrent read+write NFS access is still possible. Once all reads go through
         #   keeper process for in-progress runs, WAL is likely preferable for in-progress runs, then after the DB
         #   should be read-only and therefore safe for direct NFS access.
-        # set_sqlite_WAL_pragma(engine)
+        execute_pragmas(engine, use_wal=False)
+
+        logger.info("Creating schema for %s" % db_file)
+        metadata_to_create.create_all(engine)
         logger.info("Schema creation complete for %s" % db_file)
 
     return engine.connect()
