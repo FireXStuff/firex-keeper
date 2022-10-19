@@ -1,34 +1,79 @@
 import unittest
 import tempfile
+from time import sleep
+from multiprocessing import Process, Queue
 import os
-import stat
-from pathlib import Path
 
 from firexkit.result import ChainInterruptedException
 from firexapp.events.model import RunStates, FireXRunMetadata
-from firex_keeper.keeper_event_consumer import TaskDatabaseAggregatorThread
+from firexapp.common import wait_until
+from firex_keeper.keeper_event_consumer import KeeperThreadedEventWriter
 from firex_keeper.persist import (
     task_by_uuid_exp, task_uuid_complete_exp, FireXWaitQueryExceeded, create_db_manager,
-    get_db_file)
+    get_db_file, get_db_file_path)
 from firex_keeper import task_query
 from firex_keeper.keeper_helper import can_any_write, remove_write_permissions
+from firex_keeper.db_model import firex_tasks
 
 
-def _write_events_to_db(logs_dir, events, cleanup=True):
-    run_metadata = FireXRunMetadata('1', logs_dir, 'Noop', None)
-    aggregator_thread = TaskDatabaseAggregatorThread(None, run_metadata)
+def __write_events(logs_dir, events):
+    event_writer = KeeperThreadedEventWriter(
+        FireXRunMetadata('1', logs_dir, 'Noop', None),
+    )
 
     for e in events:
-        aggregator_thread._on_celery_event(e)
+        event_writer.queue_celery_event(e)
 
-    if cleanup:
-        aggregator_thread._on_cleanup()
+    return event_writer
 
-    return aggregator_thread
+
+def _write_and_wait_for_stop(logs_dir, events, q):
+    event_writer = __write_events(logs_dir, events)
+
+    while True:
+        maybe_event = q.get() # block till something on the queue
+        if maybe_event is None:
+            event_writer.stop()
+            break
+        else:
+            event_writer.queue_celery_event(maybe_event)
+
+
+class ProcessedKeeperWriter:
+    def __init__(self, proc, q):
+        self.p = proc
+        self.q = q
+
+    def stop(self):
+        self.q.put(None)
+        self.p.join()
+
+    def queue_event(self, event):
+        self.q.put(event)
+
+
+def _write_events_to_db(logs_dir, events, stop=True):
+    if stop:
+        writer = __write_events(logs_dir, events)
+        writer.stop()
+        return None
+    else:
+        # can't have writing/querying in same process from different threads,
+        # so run data writing in seperate process for tests that want to query
+        # "in-progress" keeper DBs.
+        q = Queue()
+        p = Process(target=_write_and_wait_for_stop, args=(logs_dir, events, q))
+        p.start()
+        wait_until(
+            lambda: os.path.isfile(get_db_file_path(logs_dir)),
+            timeout=5,
+            sleep_for=0.1)
+        return ProcessedKeeperWriter(p, q)
 
 
 def chain_exception_str(uuid):
     return ChainInterruptedException(task_id=uuid).__repr__()
+
 
 tree_events = [
     #           1
@@ -155,28 +200,25 @@ class FireXKeeperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdirname:
             logs_dir = str(tmpdirname)
 
-            aggregator = _write_events_to_db(
+            stopper = _write_events_to_db(
                 logs_dir,
                 [
                     {'uuid': '1', 'name': 'Noop', 'type': RunStates.STARTED.value},
                     {'uuid': '2', 'name': 'Noop'},
                 ],
-                cleanup=False)
+                stop=False)
             self.assertTrue(can_any_write(get_db_file(logs_dir)))
 
             # Make sure that task 1 is not yet complete
-            # self.assertRaises(FireXWaitQueryExceeded, task_query.tasks_by_name, logs_dir, 'Noop',
-            #                   wait_for_exp_exist=task_uuid_complete_exp('1'), max_wait=1, error_on_wait_exceeded=True)
+            self.assertRaises(FireXWaitQueryExceeded, task_query.tasks_by_name, logs_dir, 'Noop',
+                              wait_for_exp_exist=task_uuid_complete_exp('1'), max_wait=1, error_on_wait_exceeded=True)
 
-            # complete the task
-            aggregator._on_celery_event({'uuid': '1', 'type': RunStates.FAILED.value})
+            stopper.stop()
 
             # expect result now that the task is complete, not an exception.
             tasks = task_query.tasks_by_name(logs_dir, 'Noop', wait_for_exp_exist=task_uuid_complete_exp('1'),
-                                             max_wait=1, error_on_wait_exceeded=True)
+                                             max_wait=3, error_on_wait_exceeded=True)
             self.assertEqual(2, len(tasks))
-
-            aggregator._on_cleanup()
 
             # Verify that after a run is complete, the DB is no longer writeable.
             # TODO: Enable after verifying this doesn't harm cleanup.
@@ -193,14 +235,26 @@ class FireXKeeperTests(unittest.TestCase):
     def test_query_running(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
             logs_dir = str(tmpdirname)
-            _write_events_to_db(logs_dir, [
-                {'uuid': '1', 'name': 'run1', 'type': RunStates.STARTED.value},
-                {'uuid': '2', 'name': 'run2', 'type': RunStates.UNBLOCKED.value},
-                {'uuid': '3', 'name': 'done', 'firex_result': 0, 'type': RunStates.FAILED.value},
-            ])
+            stopper = _write_events_to_db(
+                logs_dir,
+                [
+                    {'uuid': '1', 'name': 'run1', 'type': RunStates.STARTED.value},
+                    {'uuid': '2', 'name': 'run2', 'type': RunStates.UNBLOCKED.value},
+                    {'uuid': '3', 'name': 'done', 'firex_result': 0, 'type': RunStates.FAILED.value},
+                ],
+                stop=False,
+            )
 
-            tasks = task_query.running_tasks(logs_dir)
+            tasks = task_query.running_tasks(
+                logs_dir, wait_for_exp_exist=task_by_uuid_exp('3'), max_wait=2, error_on_wait_exceeded=True)
             self.assertEqual(2, len(tasks))
+
+            stopper.stop()
+
+            # Stopping keeper sets all incomplete tasks to a non-celery
+            # terminal run state.
+            tasks = task_query.running_tasks(logs_dir)
+            self.assertEqual(0, len(tasks))
 
     def test_task_table_exists(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
@@ -225,6 +279,49 @@ class FireXKeeperTests(unittest.TestCase):
             self.assertEqual(1, len(tasks))
             self.assertEqual('FailedByChild', tasks[0].name)
             self.assertEqual('2', tasks[0].uuid)
+
+    def test_event_after_task_completed(self):
+        """
+            Receiving an event for a completed task is a special case
+            in the aggregator since the task record needs to be read
+            from the DB. This is because completed tasks are removed
+            from memory to keep memory use lower.
+        """
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            logs_dir = str(tmpdirname)
+
+            writer_proc = _write_events_to_db(
+                logs_dir,
+                [
+                    {'uuid': '1', 'name': 'Noop', 'type': RunStates.FAILED.value},
+                ],
+                stop=False)
+
+            # Make sure that task 1 is not yet complete
+            tasks = task_query.tasks_by_name(
+                logs_dir, 'Noop',
+                wait_for_exp_exist=task_by_uuid_exp('1'),
+                max_wait=2,
+                error_on_wait_exceeded=True)
+            self.assertEqual(1, len(tasks))
+
+            writer_proc.queue_event(
+                {'uuid': '1', 'type': RunStates.STARTED.value},
+            )
+
+            tasks = task_query.tasks_by_name(
+                logs_dir, 'Noop',
+                wait_for_exp_exist=firex_tasks.c.state == RunStates.STARTED.value,
+                max_wait=2,
+                error_on_wait_exceeded=True)
+            self.assertEqual(1, len(tasks))
+            self.assertEqual(RunStates.STARTED.value, tasks[0].state)
+
+            writer_proc.stop()
+
+            # expect result now that the task is complete, not an exception.
+            tasks = task_query.tasks_by_name(logs_dir, 'Noop')
+            self.assertEqual(1, len(tasks))
 
     def test_task_table_not_exists(self):
         from firex_keeper.persist import _db_connection_str, FireXRunDbManager
