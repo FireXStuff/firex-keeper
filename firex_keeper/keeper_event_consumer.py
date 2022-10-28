@@ -176,11 +176,11 @@ class KeeperEventAggregator(AbstractFireXEventAggregator):
         # tasks kept here (None for complete task UUIDs).
         # This minimizes memory usage.
         self.maybe_tasks_by_uuid : dict[str, Optional[dict]] = {}
+        self.root_task_uuid = None
 
     def aggregate_events(self, events):
+        self._maybe_set_root_uuid(events)
         new_data_by_task_uuid = super().aggregate_events(events)
-        # TODO: disable by task-completion, or state in COMPLETED?
-
         for uuid in new_data_by_task_uuid:
             if uuid in self.maybe_tasks_by_uuid:
                 if (
@@ -195,6 +195,28 @@ class KeeperEventAggregator(AbstractFireXEventAggregator):
                 logger.error(f'New data for untracked UUID: {uuid}')
 
         return new_data_by_task_uuid
+
+    def is_root_complete(self) -> bool:
+        # Need to override this to avoid accessing DB from broker processor thread
+        # since base class accesses root task via _get_task. Can't access DB across threads.
+        if (
+            self.root_task_uuid is not None
+            and self.root_task_uuid in self.maybe_tasks_by_uuid
+            # None tasks mean complete
+            and self.maybe_tasks_by_uuid[self.root_task_uuid] is None
+        ):
+            return True
+        return False
+
+    def _maybe_set_root_uuid(self, events):
+        if self.root_task_uuid is not None:
+            return # root already set by previous event.
+
+        self.root_task_uuid  = next(
+            (e.get('root_id') for e in events
+             if e.get('type') == 'task-received' and e.get('root_id')),
+            None
+        )
 
     def _task_exists(self, task_uuid: str) -> bool:
         if not task_uuid:

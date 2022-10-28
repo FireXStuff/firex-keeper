@@ -8,7 +8,7 @@ from firex_keeper.db_model import firex_tasks
 from firex_keeper.persist import get_db_manager, get_db_file_path, task_by_uuid_exp, get_keeper_complete_file_path
 from firex_keeper.keeper_helper import FireXTreeTask
 from firexapp.common import wait_until
-
+from sqlalchemy.sql import and_
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +95,15 @@ def revoked_tasks(logs_dir, **kwargs) -> List[FireXTask]:
 def running_tasks(logs_dir, **kwargs) -> List[FireXTask]:
     return _query_tasks(logs_dir, firex_tasks.c[TaskColumn.STATE.value].in_(INCOMPLETE_RUNSTATES), **kwargs)
 
+
+def running_not_blocked_tasks(logs_dir, **kwargs) -> List[FireXTask]:
+    return _query_tasks(
+        logs_dir,
+        and_(
+            firex_tasks.c[TaskColumn.STATE.value].in_(INCOMPLETE_RUNSTATES),
+            firex_tasks.c[TaskColumn.STATE.value] != RunStates.BLOCKED.value,
+        ),
+        **kwargs)
 
 def failed_by_tasks(logs_dir, failed_uuid: str, **kwargs) -> List[FireXTask]:
     # TODO: make this work with copy_before_query without copying twice,
