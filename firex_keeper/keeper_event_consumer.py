@@ -104,7 +104,7 @@ class KeeperThreadedEventWriter:
 
                 celery_events = [i[1] for i in queue_items if i[0] == KeeperQueueEntryType.CELERY_EVENT]
                 if celery_events:
-                    written_celery_event_count += self._aggregate_events_and_update_db(
+                    written_celery_event_count = self._aggregate_events_and_update_db(
                         celery_events,
                         run_db_manager,
                         written_celery_event_count,
