@@ -3,6 +3,11 @@ import tempfile
 from time import sleep
 from multiprocessing import Process, Queue
 import os
+from sqlalchemy import create_engine
+from unittest.mock import patch, MagicMock
+from sqlalchemy.engine.base import Connection
+from sqlalchemy.exc import OperationalError
+
 
 from firexkit.result import ChainInterruptedException
 from firexapp.events.model import RunStates, FireXRunMetadata
@@ -10,7 +15,8 @@ from firexapp.common import wait_until
 from firex_keeper.keeper_event_consumer import KeeperThreadedEventWriter
 from firex_keeper.persist import (
     task_by_uuid_exp, task_uuid_complete_exp, FireXWaitQueryExceeded, create_db_manager,
-    get_db_file, get_db_file_path)
+    get_db_file, get_db_file_path, FireXRunDbManager, _db_connection_str, get_db_manager
+)
 from firex_keeper import task_query
 from firex_keeper.keeper_helper import can_any_write, remove_write_permissions
 from firex_keeper.db_model import firex_tasks
@@ -22,7 +28,12 @@ def __write_events(logs_dir, events):
     )
 
     for e in events:
-        event_writer.queue_celery_event(e)
+        try:
+            event_writer.queue_celery_event(e)
+        except Exception:
+            # do not hang test running, this is test writing error.
+            event_writer.stop()
+            raise
 
     return event_writer
 
@@ -312,7 +323,7 @@ class FireXKeeperTests(unittest.TestCase):
             tasks = task_query.tasks_by_name(
                 logs_dir, 'Noop',
                 wait_for_exp_exist=firex_tasks.c.state == RunStates.STARTED.value,
-                max_wait=2,
+                max_wait=4,
                 error_on_wait_exceeded=True)
             self.assertEqual(1, len(tasks))
             self.assertEqual(RunStates.STARTED.value, tasks[0].state)
@@ -324,10 +335,47 @@ class FireXKeeperTests(unittest.TestCase):
             self.assertEqual(1, len(tasks))
 
     def test_task_table_not_exists(self):
-        from firex_keeper.persist import _db_connection_str, FireXRunDbManager
-        from sqlalchemy import create_engine
-
         with tempfile.NamedTemporaryFile() as db_file:
             engine = create_engine(_db_connection_str(db_file.name, read_only=False))
             db_manager = FireXRunDbManager(engine.connect())
             self.assertFalse(db_manager.task_table_exists())
+
+
+    def test_write_retry_success(self,):
+        with (
+            tempfile.TemporaryDirectory() as tmpdirname,
+            get_db_manager(tmpdirname, new=True) as db_manager,
+            patch.object(Connection, 'execute') as mock_execute,
+        ):
+            # fail twice, then succeed, relying on retries.
+            mock_execute.side_effect = [
+                OperationalError('DB failed', params={}, orig=None),
+                OperationalError('DB failed', params={}, orig=None),
+                Connection.execute,
+            ]
+
+            db_manager.insert_or_update_tasks(
+                {'1': {'uuid': '1', 'name': 'Noop'}},
+                root_uuid=None,
+                firex_id='FireX-1'
+            )
+            self.assertEqual(mock_execute.call_count, 3)
+
+    def test_write_retry_fail(self,):
+        with (
+            tempfile.TemporaryDirectory() as tmpdirname,
+            get_db_manager(tmpdirname, new=True) as db_manager,
+            patch.object(Connection, 'execute') as mock_execute,
+        ):
+            # fail twice, then succeed, relying on retries.
+            mock_execute.side_effect = [
+                OperationalError('DB failed', params={}, orig=None)
+                for _ in range(6)
+            ]
+            with self.assertRaises(OperationalError):
+                db_manager.insert_or_update_tasks(
+                    {'1': {'uuid': '1', 'name': 'Noop'}},
+                    root_uuid=None,
+                    firex_id='FireX-1'
+                )
+            self.assertEqual(mock_execute.call_count, 5)

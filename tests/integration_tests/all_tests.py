@@ -22,6 +22,9 @@ class KeepNoopData(FlowTestConfiguration):
 
     def assert_expected_firex_output(self, cmd_output, cmd_err):
         logs_dir = get_log_dir_from_output(cmd_output)
+        keeper_complete = task_query.wait_on_keeper_complete(logs_dir)
+        assert keeper_complete, "Keeper database is not complete."
+
         tasks = task_query.tasks_by_name(logs_dir, 'echo')
         assert tasks[0].name == 'echo'
         assert tasks[0].state == RunStates.SUCCEEDED.value

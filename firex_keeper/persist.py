@@ -3,11 +3,12 @@ import logging
 import os
 from typing import List
 from contextlib import contextmanager
-from time import perf_counter
+from time import perf_counter, sleep
 
 from firexapp.submit.uid import Uid
 from sqlalchemy import create_engine
 from sqlalchemy.sql import select, and_
+from sqlalchemy.exc import OperationalError
 
 from firexapp.events.model import FireXTask, FireXRunMetadata, get_task_data, COMPLETE_RUNSTATES
 from firexapp.common import wait_until
@@ -142,10 +143,10 @@ def create_db_manager(logs_dir):
 
 
 @contextmanager
-def get_db_manager(logs_dir, read_only=False):
+def get_db_manager(logs_dir, new=False, read_only=False):
     "Get a DB manager for an existing keeper DB file."
 
-    db_file = get_db_file(logs_dir, new=False)
+    db_file = get_db_file(logs_dir, new=new)
     is_run_complete = is_keeper_db_complete(logs_dir)
     conn = connect_db(db_file, read_only=read_only, is_run_complete=is_run_complete)
     db_manager = FireXRunDbManager(conn)
@@ -159,22 +160,47 @@ def _row_to_run_metadata(row):
     # The first 4 columns from the table make up a FireXRunMetadata.
     return FireXRunMetadata(*row[:4])
 
+RETRYING_DB_EXCEPTIONS = (OperationalError,)
+
+def retry(exceptions, max_attempts: int=5, retry_delay: int=1):
+    def retry_decorator(func):
+        def retrying_wrapper(*args, **kwargs):
+            attempt = 0
+            while attempt < max_attempts:
+                attempt += 1
+                try:
+                    return func(*args, **kwargs)
+                except exceptions:
+                    if attempt >= max_attempts:
+                        raise
+                    sleep(retry_delay)
+
+        return retrying_wrapper
+    return retry_decorator
 
 class FireXRunDbManager:
 
     def __init__(self, db_conn):
         self.db_conn = db_conn
 
+    @retry(RETRYING_DB_EXCEPTIONS)
     def insert_run_metadata(self, run_metadata: FireXRunMetadata) -> None:
         self.db_conn.execute(firex_run_metadata.insert().values(**run_metadata._asdict()))
 
     def _set_root_uuid(self, root_uuid) -> None:
         self.db_conn.execute(firex_run_metadata.update().values(root_uuid=root_uuid))
 
+    @retry(RETRYING_DB_EXCEPTIONS)
     def set_keeper_complete(self):
         self.db_conn.execute(firex_run_metadata.update().values(keeper_complete=True))
 
-    def insert_or_update_tasks(self, new_task_data_by_uuid, root_uuid, firex_id):
+    @retry(RETRYING_DB_EXCEPTIONS)
+    def insert_or_update_tasks(
+        self,
+        new_task_data_by_uuid,
+        root_uuid,
+        firex_id : str,
+    ):
         with self.db_conn.begin():
             for uuid, new_task_data in new_task_data_by_uuid.items():
                 persisted_keys_new_task_data = get_task_data(new_task_data)
@@ -216,6 +242,7 @@ class FireXRunDbManager:
             else:
                 logger.warning(msg)
 
+    @retry(RETRYING_DB_EXCEPTIONS)
     def query_tasks(self, exp, wait_for_exp_exist=None, max_wait=15, error_on_wait_exceeded=False) -> List[FireXTask]:
         if wait_for_exp_exist is not None:
             self.wait_before_query(wait_for_exp_exist, max_wait, error_on_wait_exceeded)
@@ -225,29 +252,31 @@ class FireXRunDbManager:
         for row in db_result:
             try:
                 result_tasks.append(FireXTask(*row))
-            except Exception as e:
+            except TypeError as e:
                 logger.error(f"Failed transforming {row[0]}")
                 logger.exception(e)
                 raise
         return result_tasks
 
-    def query_run_metadata(self, firex_id) -> List[FireXRunMetadata]:
+    @retry(RETRYING_DB_EXCEPTIONS)
+    def query_run_metadata(self, firex_id) -> list[FireXRunMetadata]:
         result = self.db_conn.execute(select([firex_run_metadata]).where(firex_run_metadata.c.firex_id == firex_id))
         if not result:
-            raise Exception("Found no run data for %s" % firex_id)
-        # The first 4 columns from the table make up a FireXRunMetadata.
+            raise Exception(f"Found no run data for {firex_id}")
         return [_row_to_run_metadata(row) for row in result][0]
 
     def _query_single_run_metadata_row(self):
         result = self.db_conn.execute(select([firex_run_metadata]))
         rows = [r for r in result]
         if len(rows) != 1:
-            raise Exception("Expected exactly one firex_run_metadata, but found %d" % len(rows))
+            raise Exception(f"Expected exactly one firex_run_metadata, but found {len(rows)}")
         return rows[0]
 
+    @retry(RETRYING_DB_EXCEPTIONS)
     def is_keeper_complete(self) -> bool:
         return self._query_single_run_metadata_row()['keeper_complete']
 
+    @retry(RETRYING_DB_EXCEPTIONS)
     def query_single_run_metadata(self) -> FireXRunMetadata:
         return _row_to_run_metadata(self._query_single_run_metadata_row())
 

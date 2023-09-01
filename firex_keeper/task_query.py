@@ -1,11 +1,14 @@
 import logging
 from typing import List
 import os
+from tempfile import TemporaryDirectory
+import shutil
 
 from firexapp.events.model import TaskColumn, RunStates, FireXTask, is_chain_exception, get_chain_exception_child_uuid, \
     INCOMPLETE_RUNSTATES, is_failed
 from firex_keeper.db_model import firex_tasks
-from firex_keeper.persist import get_db_manager, get_db_file_path, task_by_uuid_exp, get_keeper_complete_file_path
+from firex_keeper.persist import get_db_manager, get_db_file_path, task_by_uuid_exp, get_keeper_complete_file_path, \
+    get_db_file
 from firex_keeper.keeper_helper import FireXTreeTask
 from firexapp.common import wait_until
 from sqlalchemy.sql import and_
@@ -30,9 +33,6 @@ def _wait_and_query(logs_dir, query, db_file_query_ready_timeout, **kwargs) -> L
 def _query_tasks(logs_dir, query, db_file_query_ready_timeout=15, copy_before_query=False, **kwargs) -> List[FireXTask]:
 
     if copy_before_query:
-        from tempfile import TemporaryDirectory
-        from firex_keeper.persist import get_db_file
-        import shutil
         with TemporaryDirectory() as temp_log_dir:
             existing_db_file = get_db_file(logs_dir, new=False)
             new_tmp_db_file = get_db_file(temp_log_dir, new=True)
@@ -237,7 +237,7 @@ def _wait_task_table_exist(db_manager, timeout):
 def wait_on_db_file_query_ready(logs_dir, timeout=15, db_manager=None):
     db_file_exists = wait_until(os.path.isfile, timeout, 1, get_db_file_path(logs_dir))
     if not db_file_exists:
-        return db_file_exists
+        return False
 
     if db_manager:
         return _wait_task_table_exist(db_manager, timeout)
