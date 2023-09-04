@@ -36,9 +36,15 @@ def _query_tasks(logs_dir, query, db_file_query_ready_timeout=15, copy_before_qu
         with TemporaryDirectory() as temp_log_dir:
             existing_db_file = get_db_file(logs_dir, new=False)
             new_tmp_db_file = get_db_file(temp_log_dir, new=True)
-            subprocess.check_output(
-                ['/bin/sqlite3', existing_db_file, f'.backup {new_tmp_db_file}'],
-                cwd=temp_log_dir)
+
+            sqlite_bin = '/bin/sqlite3'
+            if os.path.isfile(sqlite_bin):
+                subprocess.check_output(
+                    [sqlite_bin, existing_db_file, f'.backup {new_tmp_db_file}'],
+                    cwd=temp_log_dir)
+            else:
+                shutil.copyfile(existing_db_file, new_tmp_db_file)
+
             query_results = _wait_and_query(temp_log_dir, query, db_file_query_ready_timeout, **kwargs)
     else:
         query_results = _wait_and_query(logs_dir, query, db_file_query_ready_timeout, **kwargs)
