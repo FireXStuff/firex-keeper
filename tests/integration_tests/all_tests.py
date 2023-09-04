@@ -32,7 +32,7 @@ class KeepNoopData(FlowTestConfiguration):
         firex_id = os.path.basename(logs_dir)
         with get_db_manager(logs_dir) as db_manager:
             run_metadata = db_manager.query_run_metadata(firex_id)
-            is_complete = wait_until(db_manager.is_keeper_complete, timeout=5, sleep_for=0.5)
+            is_complete = wait_until(db_manager._is_keeper_complete, timeout=5, sleep_for=0.5)
             assert is_complete is True
 
         assert run_metadata.chain == 'echo'

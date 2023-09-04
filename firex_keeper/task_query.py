@@ -3,12 +3,13 @@ from typing import List
 import os
 from tempfile import TemporaryDirectory
 import shutil
+import subprocess
 
 from firexapp.events.model import TaskColumn, RunStates, FireXTask, is_chain_exception, get_chain_exception_child_uuid, \
-    INCOMPLETE_RUNSTATES, is_failed
+    INCOMPLETE_RUNSTATES
 from firex_keeper.db_model import firex_tasks
-from firex_keeper.persist import get_db_manager, get_db_file_path, task_by_uuid_exp, get_keeper_complete_file_path, \
-    get_db_file
+from firex_keeper.persist import get_db_manager, task_by_uuid_exp, get_keeper_complete_file_path, \
+    get_db_file, get_keeper_query_ready_file_path
 from firex_keeper.keeper_helper import FireXTreeTask
 from firexapp.common import wait_until
 from sqlalchemy.sql import and_
@@ -25,18 +26,19 @@ def _task_col_eq(task_col, val):
 
 
 def _wait_and_query(logs_dir, query, db_file_query_ready_timeout, **kwargs) -> List[FireXTask]:
+    wait_on_keeper_query_ready(logs_dir, db_file_query_ready_timeout)
     with get_db_manager(logs_dir, read_only=True) as db_manager:
-        wait_on_db_file_query_ready(logs_dir, db_manager=db_manager, timeout=db_file_query_ready_timeout)
         return db_manager.query_tasks(query, **kwargs)
 
 
 def _query_tasks(logs_dir, query, db_file_query_ready_timeout=15, copy_before_query=False, **kwargs) -> List[FireXTask]:
-
     if copy_before_query:
         with TemporaryDirectory() as temp_log_dir:
             existing_db_file = get_db_file(logs_dir, new=False)
             new_tmp_db_file = get_db_file(temp_log_dir, new=True)
-            shutil.copyfile(existing_db_file, new_tmp_db_file)
+            subprocess.check_output(
+                ['/bin/sqlite3', existing_db_file, f'.backup {new_tmp_db_file}'],
+                cwd=temp_log_dir)
             query_results = _wait_and_query(temp_log_dir, query, db_file_query_ready_timeout, **kwargs)
     else:
         query_results = _wait_and_query(logs_dir, query, db_file_query_ready_timeout, **kwargs)
@@ -230,21 +232,11 @@ def find_task_causing_chain_exception(task: FireXTreeTask):
     return find_task_causing_chain_exception(causing_child)
 
 
-def _wait_task_table_exist(db_manager, timeout):
-    return wait_until(db_manager.task_table_exists, timeout=timeout, sleep_for=0.5)
-
-
-def wait_on_db_file_query_ready(logs_dir, timeout=15, db_manager=None):
-    db_file_exists = wait_until(os.path.isfile, timeout, 1, get_db_file_path(logs_dir))
-    if not db_file_exists:
-        return False
-
-    if db_manager:
-        return _wait_task_table_exist(db_manager, timeout)
-    else:
-        with get_db_manager(logs_dir, read_only=True) as db_manager:
-            return _wait_task_table_exist(db_manager, timeout)
+def wait_on_keeper_query_ready(logs_dir: str, timeout: int=10):
+    return wait_until(os.path.isfile, timeout, 0.5,
+                      get_keeper_query_ready_file_path(logs_dir))
 
 
 def wait_on_keeper_complete(logs_dir, timeout=30) -> bool:
-    return wait_until(os.path.isfile, timeout, 1, get_keeper_complete_file_path(logs_dir))
+    return wait_until(os.path.isfile, timeout, 1,
+                      get_keeper_complete_file_path(logs_dir))

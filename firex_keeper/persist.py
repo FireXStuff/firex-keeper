@@ -4,6 +4,7 @@ import os
 from typing import List
 from contextlib import contextmanager
 from time import perf_counter, sleep
+from pathlib import Path
 
 from firexapp.submit.uid import Uid
 from sqlalchemy import create_engine
@@ -106,12 +107,8 @@ def connect_db(db_file, read_only=False, metadata_to_create=metadata, is_run_com
     return engine.connect()
 
 
-def get_db_file_dir_path(logs_dir):
+def get_db_file_dir_path(logs_dir: str) -> str:
     return os.path.join(logs_dir, Uid.debug_dirname, 'keeper')
-
-
-def get_db_file_path(logs_dir):
-    return os.path.join(get_db_file_dir_path(logs_dir), 'firex_run.db')
 
 
 def get_keeper_complete_file_path(logs_dir):
@@ -125,8 +122,18 @@ def is_keeper_db_complete(logs_dir):
     return os.path.isfile(get_keeper_complete_file_path(logs_dir))
 
 
-def get_db_file(logs_dir, new=False):
-    db_file = get_db_file_path(logs_dir)
+def get_keeper_query_ready_file_path(logs_dir: str) -> str:
+    return os.path.join(get_db_file_dir_path(logs_dir), '.keeper_query_ready')
+
+
+def is_keeper_db_query_ready(logs_dir: str) -> bool:
+    return os.path.isfile(
+        get_keeper_query_ready_file_path(logs_dir)
+    )
+
+
+def get_db_file(logs_dir: str, new=False) -> str:
+    db_file = os.path.join(get_db_file_dir_path(logs_dir), 'firex_run.db')
     if new:
         assert not os.path.exists(db_file), "Cannot create new DB file, it already exists: %s" % db_file
         db_file_parent = os.path.dirname(db_file)
@@ -134,12 +141,6 @@ def get_db_file(logs_dir, new=False):
     else:
         assert os.path.isfile(db_file), f"DB file does not exist: {db_file}"
     return db_file
-
-
-def create_db_manager(logs_dir):
-    conn = connect_db(get_db_file(logs_dir, new=True), read_only=False)
-    logger.info("Created DB connection.")
-    return FireXRunDbManager(conn)
 
 
 @contextmanager
@@ -227,20 +228,18 @@ class FireXRunDbManager:
         return self.db_conn.execute(query).scalar() is not None
 
     def wait_before_query(self, whereclause, max_wait, error_on_wait_exceeded):
-        if not self.is_keeper_complete():
+        if not self._is_keeper_complete():
             start_wait_time = perf_counter()
             exists = wait_until(self.does_task_whereclause_exist, max_wait, 0.5, whereclause)
-            wait_duration = perf_counter() - start_wait_time
-            logger.debug("Keeper query waited %.2f secs for wait query to exist." % wait_duration)
-        else:
-            exists = self.does_task_whereclause_exist(whereclause)
-
-        if not exists:
-            msg = f"Wait exceeded {max_wait} seconds for {whereclause} to exist, but it still does not."
-            if error_on_wait_exceeded:
-                raise FireXWaitQueryExceeded(msg)
+            if not exists:
+                msg = f"Wait exceeded {max_wait} seconds for {whereclause} to exist, but it still does not."
+                if error_on_wait_exceeded:
+                    raise FireXWaitQueryExceeded(msg)
+                else:
+                    logger.warning(msg)
             else:
-                logger.warning(msg)
+                wait_duration = perf_counter() - start_wait_time
+                logger.debug(f"Keeper query waited {wait_duration:.2f} secs for wait query to exist.")
 
     @retry(RETRYING_DB_EXCEPTIONS)
     def query_tasks(self, exp, wait_for_exp_exist=None, max_wait=15, error_on_wait_exceeded=False) -> List[FireXTask]:
@@ -273,16 +272,19 @@ class FireXRunDbManager:
         return rows[0]
 
     @retry(RETRYING_DB_EXCEPTIONS)
-    def is_keeper_complete(self) -> bool:
+    def _is_keeper_complete(self) -> bool:
         return self._query_single_run_metadata_row()['keeper_complete']
 
     @retry(RETRYING_DB_EXCEPTIONS)
     def query_single_run_metadata(self) -> FireXRunMetadata:
         return _row_to_run_metadata(self._query_single_run_metadata_row())
 
-    def task_table_exists(self):
-        result = self.db_conn.execute(f'SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name="{TASKS_TABLENAME}");')
-        return bool([r for r in result][0][0])
-
     def close(self):
         self.db_conn.close()
+
+
+def create_db_manager(logs_dir: str) -> FireXRunDbManager:
+    conn = connect_db(get_db_file(logs_dir, new=True), read_only=False)
+    logger.info("Created DB connection.")
+    Path(get_keeper_query_ready_file_path(logs_dir)).touch()
+    return FireXRunDbManager(conn)

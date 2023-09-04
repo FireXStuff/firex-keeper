@@ -1,24 +1,20 @@
 import unittest
 import tempfile
-from time import sleep
 from multiprocessing import Process, Queue
-import os
-from sqlalchemy import create_engine
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from sqlalchemy.engine.base import Connection
 from sqlalchemy.exc import OperationalError
 
 
 from firexkit.result import ChainInterruptedException
 from firexapp.events.model import RunStates, FireXRunMetadata
-from firexapp.common import wait_until
 from firex_keeper.keeper_event_consumer import KeeperThreadedEventWriter
 from firex_keeper.persist import (
-    task_by_uuid_exp, task_uuid_complete_exp, FireXWaitQueryExceeded, create_db_manager,
-    get_db_file, get_db_file_path, FireXRunDbManager, _db_connection_str, get_db_manager
+    task_by_uuid_exp, task_uuid_complete_exp, FireXWaitQueryExceeded,
+    get_db_file, get_db_manager
 )
 from firex_keeper import task_query
-from firex_keeper.keeper_helper import can_any_write, remove_write_permissions
+from firex_keeper.keeper_helper import can_any_write
 from firex_keeper.db_model import firex_tasks
 
 
@@ -75,10 +71,7 @@ def _write_events_to_db(logs_dir, events, stop=True):
         q = Queue()
         p = Process(target=_write_and_wait_for_stop, args=(logs_dir, events, q))
         p.start()
-        wait_until(
-            lambda: os.path.isfile(get_db_file_path(logs_dir)),
-            timeout=5,
-            sleep_for=0.1)
+        task_query.wait_on_keeper_query_ready(logs_dir, timeout=5)
         return ProcessedKeeperWriter(p, q)
 
 
@@ -115,6 +108,17 @@ class FireXKeeperTests(unittest.TestCase):
 
             other_task = task_query.task_by_uuid(logs_dir, '3')
             self.assertEqual('Other', other_task.name)
+
+    def test_query_copy_db(self):
+        with tempfile.TemporaryDirectory() as logs_dir:
+            _write_events_to_db(logs_dir, [
+                {'uuid': '1', 'name': 'Noop'},
+                {'uuid': '2', 'name': 'Noop'},
+                {'uuid': '3', 'name': 'Other'},
+            ])
+
+            tasks = task_query.tasks_by_name(logs_dir, 'Noop', copy_before_query=True)
+            self.assertEqual(2, len(tasks))
 
     def test_query_all(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
@@ -197,15 +201,19 @@ class FireXKeeperTests(unittest.TestCase):
     def test_wait_for_task_not_exist(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
             logs_dir = str(tmpdirname)
-            _write_events_to_db(logs_dir, [
-                {'uuid': '1', 'name': 'Noop'},
-                {'uuid': '2', 'name': 'Noop'},
-                {'uuid': '3', 'name': 'Other'},
-            ])
+            stopper = _write_events_to_db(
+                logs_dir,
+                [
+                    {'uuid': '1', 'name': 'Noop'},
+                    {'uuid': '2', 'name': 'Noop'},
+                    {'uuid': '3', 'name': 'Other'},
+                ],
+                stop=False)
 
             self.assertRaises(FireXWaitQueryExceeded, task_query.tasks_by_name, logs_dir, 'Noop',
                               wait_for_exp_exist=task_by_uuid_exp('some fake uuid'), max_wait=1,
                               error_on_wait_exceeded=True)
+            stopper.stop()
 
     def test_wait_for_task_complete(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
@@ -267,16 +275,6 @@ class FireXKeeperTests(unittest.TestCase):
             tasks = task_query.running_tasks(logs_dir)
             self.assertEqual(0, len(tasks))
 
-    def test_task_table_exists(self):
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            db_mgr = create_db_manager(tmpdirname)
-            self.assertTrue(db_mgr.task_table_exists())
-
-            db_file = get_db_file(tmpdirname)
-            # Make file not writeable
-            remove_write_permissions(db_file)
-            self.assertTrue(db_mgr.task_table_exists())
-
     def test_query_by_failed_by(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
             logs_dir = str(tmpdirname)
@@ -333,13 +331,6 @@ class FireXKeeperTests(unittest.TestCase):
             # expect result now that the task is complete, not an exception.
             tasks = task_query.tasks_by_name(logs_dir, 'Noop')
             self.assertEqual(1, len(tasks))
-
-    def test_task_table_not_exists(self):
-        with tempfile.NamedTemporaryFile() as db_file:
-            engine = create_engine(_db_connection_str(db_file.name, read_only=False))
-            db_manager = FireXRunDbManager(engine.connect())
-            self.assertFalse(db_manager.task_table_exists())
-
 
     def test_write_retry_success(self,):
         with (
