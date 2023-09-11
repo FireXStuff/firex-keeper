@@ -239,6 +239,8 @@ def find_task_causing_chain_exception(task: FireXTreeTask):
 
 
 def wait_on_keeper_query_ready(logs_dir: str, timeout: int=10):
+    if os.path.isfile(get_keeper_complete_file_path(logs_dir)):
+        return True
     return wait_until(os.path.isfile, timeout, 0.5,
                       get_keeper_query_ready_file_path(logs_dir))
 
