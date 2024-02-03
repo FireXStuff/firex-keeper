@@ -30,9 +30,13 @@ class FireXKeeperLauncher(TrackingService):
                "--broker_recv_ready_file", self.broker_recv_ready_file,
                ]
         with open(stdout_file, 'w+') as f:
-            pid = subprocess.Popen(cmd,
-                                   stdout=f, stderr=subprocess.STDOUT,
-                                   close_fds=True).pid
+            pid = subprocess.Popen(
+                cmd,
+                stdout=f,
+                stderr=subprocess.STDOUT,
+                close_fds=True,
+                cwd=keeper_debug_dir,
+            ).pid
 
         try:
             Process(pid).wait(0.1)
