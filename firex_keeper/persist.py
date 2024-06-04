@@ -13,7 +13,7 @@ from sqlalchemy.exc import OperationalError
 
 from firexapp.events.model import FireXTask, FireXRunMetadata, get_task_data, COMPLETE_RUNSTATES
 from firexapp.common import wait_until
-from firex_keeper.db_model import metadata, firex_run_metadata, firex_tasks, TASKS_TABLENAME
+from firex_keeper.db_model import metadata, firex_run_metadata, firex_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -180,48 +180,12 @@ def retry(exceptions, max_attempts: int=5, retry_delay: int=1):
     return retry_decorator
 
 class FireXRunDbManager:
+    """
+    Read-only operations on a keeper DB connection.
+    """
 
     def __init__(self, db_conn):
         self.db_conn = db_conn
-
-    @retry(RETRYING_DB_EXCEPTIONS)
-    def insert_run_metadata(self, run_metadata: FireXRunMetadata) -> None:
-        self.db_conn.execute(firex_run_metadata.insert().values(**run_metadata._asdict()))
-
-    def _set_root_uuid(self, root_uuid) -> None:
-        self.db_conn.execute(firex_run_metadata.update().values(root_uuid=root_uuid))
-
-    @retry(RETRYING_DB_EXCEPTIONS)
-    def set_keeper_complete(self):
-        self.db_conn.execute(firex_run_metadata.update().values(keeper_complete=True))
-
-    @retry(RETRYING_DB_EXCEPTIONS)
-    def insert_or_update_tasks(
-        self,
-        new_task_data_by_uuid,
-        root_uuid,
-        firex_id : str,
-    ):
-        with self.db_conn.begin():
-            for uuid, new_task_data in new_task_data_by_uuid.items():
-                persisted_keys_new_task_data = get_task_data(new_task_data)
-                if persisted_keys_new_task_data:
-                    # The UUID is only changed for the very first event for that UUID, by definition.
-                    is_uuid_new = 'uuid' in persisted_keys_new_task_data
-                    if is_uuid_new:
-                        persisted_keys_new_task_data['firex_id'] = firex_id
-                        self._insert_task(persisted_keys_new_task_data)
-                        if uuid == root_uuid:
-                            self._set_root_uuid(uuid)
-                    else:
-                        # The UUID hasn't changed, but it's still needed to do the update since it's the task primary key.
-                        self._update_task(uuid, persisted_keys_new_task_data)
-
-    def _insert_task(self, task) -> None:
-        self.db_conn.execute(firex_tasks.insert().values(**task))
-
-    def _update_task(self, uuid, task) -> None:
-        self.db_conn.execute(firex_tasks.update().where(firex_tasks.c.uuid == uuid).values(**task))
 
     def does_task_whereclause_exist(self, whereclause):
         query = select([firex_tasks.c.uuid]).where(whereclause)
@@ -258,7 +222,7 @@ class FireXRunDbManager:
         return result_tasks
 
     @retry(RETRYING_DB_EXCEPTIONS)
-    def query_run_metadata(self, firex_id) -> list[FireXRunMetadata]:
+    def query_run_metadata(self, firex_id) -> FireXRunMetadata:
         result = self.db_conn.execute(select([firex_run_metadata]).where(firex_run_metadata.c.firex_id == firex_id))
         if not result:
             raise Exception(f"Found no run data for {firex_id}")
@@ -282,9 +246,3 @@ class FireXRunDbManager:
     def close(self):
         self.db_conn.close()
 
-
-def create_db_manager(logs_dir: str) -> FireXRunDbManager:
-    conn = connect_db(get_db_file(logs_dir, new=True), read_only=False)
-    logger.info("Created DB connection.")
-    Path(get_keeper_query_ready_file_path(logs_dir)).touch()
-    return FireXRunDbManager(conn)

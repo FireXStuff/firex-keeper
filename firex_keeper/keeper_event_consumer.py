@@ -18,8 +18,8 @@ from firexapp.events.model import FireXRunMetadata
 import sqlalchemy.exc
 from firexapp.events.model import COMPLETE_RUNSTATES
 
-from firex_keeper.persist import create_db_manager, get_keeper_complete_file_path, \
-    task_by_uuid_exp
+from firex_keeper.persist import get_keeper_complete_file_path, \
+    task_by_uuid_exp, FireXRunDbManager, get_keeper_query_ready_file_path
 
 
 logger = logging.getLogger(__name__)
@@ -47,54 +47,24 @@ class KeeperThreadedEventWriter:
     """
 
     def __init__(self, run_metadata):
-        self.run_metadata = run_metadata
-        self.celery_event_queue = queue.Queue()
-        self.writing_thread = threading.Thread(target=self._write_events_from_queue)
-
-        # The writer thread exclusively connects to the DB, so it creates the aggregator.
+        # The writer thread exclusively connects to the DB, so it creates the aggregating_writer.
         # This class (and its thread) expose some aggregated data that DOES NOT rely on querying the DB.
         # It's important only one thread accesses the DB.
         # Though there is a dict read across threads, this is safe since only self.writing_thread writes.
-        self.event_aggregator = None
+        self.aggregating_writer = None
+
+        self.celery_event_queue = queue.Queue()
+        self.writing_thread = threading.Thread(target=self._write_events_from_queue, args=(run_metadata,))
         self.writing_thread.start()
 
         # It's important the constructor only returns when it's full initialized:
-        # when both the DB and event_aggregator have been created.
-        event_aggregator_set = wait_until(lambda: self.event_aggregator is not None, timeout=5, sleep_for=0.1)
-        assert event_aggregator_set, f'DB writing thread did not create event aggregator, DB creation may have failed.'
+        # when both the DB and aggregating_writer have been created.
+        aggregating_writer_set = wait_until(lambda: self.aggregating_writer is not None, timeout=5, sleep_for=0.1)
+        assert aggregating_writer_set, 'DB writing thread did not create event aggregator, DB creation may have failed.'
 
-    def _aggregate_events_and_update_db(
-        self, celery_events, run_db_manager, written_celery_event_count
-    ):
-        new_task_data_by_uuid = self.event_aggregator.aggregate_events(celery_events)
+    def _write_events_from_queue(self, run_metadata, sleep_after_events=2):
+        self.aggregating_writer = WritingFireXRunDbManager.create_db_writer_from_run_metadata(run_metadata)
         try:
-            run_db_manager.insert_or_update_tasks(
-                new_task_data_by_uuid,
-                self.event_aggregator.root_uuid,
-                self.run_metadata.firex_id,
-            )
-        except sqlalchemy.exc.OperationalError as e:
-            logger.exception(e)
-        else:
-            # log DB write progress, similar to Celery event receive progress logging.
-            for e in celery_events:
-                if written_celery_event_count % 100 == 0:
-                    logger.debug(
-                        'Updated Keeper DB with Celery event number '
-                        f'{written_celery_event_count} with task uuid: {e.get("uuid")}')
-                written_celery_event_count += 1
-
-        return written_celery_event_count
-
-    def _write_events_from_queue(self, sleep_after_events=2):
-        written_celery_event_count = 0
-
-        run_db_manager = create_db_manager(self.run_metadata.logs_dir)
-        self.event_aggregator = KeeperEventAggregator(run_db_manager)
-        try:
-            # Root UUID is not available during initialization. Populated by first task event from celery.
-            run_db_manager.insert_run_metadata(self.run_metadata)
-
             while True:
                 # wait indefinitely for next item, either celery event or "stop" control signal.
                 queue_item = self.celery_event_queue.get()
@@ -104,47 +74,30 @@ class KeeperThreadedEventWriter:
 
                 celery_events = [i[1] for i in queue_items if i[0] == KeeperQueueEntryType.CELERY_EVENT]
                 if celery_events:
-                    written_celery_event_count = self._aggregate_events_and_update_db(
-                        celery_events,
-                        run_db_manager,
-                        written_celery_event_count,
-                    )
+                    self.aggregating_writer.aggregate_events_and_update_db(celery_events)
+                    for _ in celery_events:
+                        self.celery_event_queue.task_done()
 
-                for _ in range(len(queue_items)):
-                    self.celery_event_queue.task_done()
-
-                stop = any(i[0] == KeeperQueueEntryType.STOP for i in queue_items)
+                stop = [i for i in queue_items if i[0] == KeeperQueueEntryType.STOP]
                 if stop:
+                    for _ in stop:
+                        self.celery_event_queue.task_done()
                     break
 
                 # Sleep to allow events to accumulate so that writes are grouped.
                 # TODO: Would be nice if STOP message could interrupt this sleep
                 # to avoid shutdown delays.
                 sleep(sleep_after_events)
-
-            # set all incomplete tasks to a terminal state since we'll never
-            # get any more celery events.
-            self._aggregate_events_and_update_db(
-                self.event_aggregator.generate_incomplete_events(),
-                run_db_manager,
-                written_celery_event_count,
-            )
-
-            run_db_manager.set_keeper_complete()
         finally:
-            run_db_manager.close()
-
-        # TODO: confirm this won't affect cleanup operations.
-        # _remove_write_permissions(get_db_file(logs_dir, new=False))
-        Path(get_keeper_complete_file_path(self.run_metadata.logs_dir)).touch()
+            self.aggregating_writer.complete_writing()
 
     def is_root_complete(self):
         # This method is (and must be) threadsafe and not access the DB.
-        return self.event_aggregator.is_root_complete()
+        return self.aggregating_writer and self.aggregating_writer.is_root_complete()
 
     def are_all_tasks_complete(self):
         # This method is (and must be) threadsafe and not access the DB.
-        return self.event_aggregator.are_all_tasks_complete()
+        return self.aggregating_writer and self.aggregating_writer.are_all_tasks_complete()
 
     def queue_celery_event(self, celery_event):
         self.celery_event_queue.put(
@@ -168,9 +121,10 @@ class KeeperEventAggregator(AbstractFireXEventAggregator):
         aggregation.
     """
 
-    def __init__(self, run_db_manager):
+    def __init__(self, run_db_manager: 'WritingFireXRunDbManager', firex_id: str):
         super().__init__(DEFAULT_AGGREGATOR_CONFIG)
-        self.run_db_manager = run_db_manager
+        self.run_db_manager : WritingFireXRunDbManager = run_db_manager
+        self.firex_id = firex_id
 
         # All task UUIDs stored, but only incomplete
         # tasks kept here (None for complete task UUIDs).
@@ -180,21 +134,27 @@ class KeeperEventAggregator(AbstractFireXEventAggregator):
 
     def aggregate_events(self, events):
         self._maybe_set_root_uuid(events)
-        new_data_by_task_uuid = super().aggregate_events(events)
-        for uuid in new_data_by_task_uuid:
-            if uuid in self.maybe_tasks_by_uuid:
-                if (
-                    self.maybe_tasks_by_uuid[uuid] is not None
-                    and self.maybe_tasks_by_uuid[uuid].get('state') in COMPLETE_RUNSTATES
-                ):
+        return super().aggregate_events(events)
+
+    def update_in_memory_tasks(self, new_data_by_task_uuid):
+        # Update in-memory task tracking after aggregate_events in case DB
+        # writes fail.
+        for uuid, new_task_data in new_data_by_task_uuid.items():
+            if uuid not in self.maybe_tasks_by_uuid:
+                self.maybe_tasks_by_uuid[uuid] = {} # new task
+
+            if self.maybe_tasks_by_uuid[uuid] is not None:
+                # incomplete task updated.
+                self.maybe_tasks_by_uuid[uuid].update(new_task_data)
+                if self.maybe_tasks_by_uuid[uuid].get('state') in COMPLETE_RUNSTATES:
                     # None means the task is complete, reducing memory footprint
                     # If new events are received for this task, it will be loaded
                     # from the DB via self._get_task
                     self.maybe_tasks_by_uuid[uuid] = None
             else:
-                logger.error(f'New data for untracked UUID: {uuid}')
-
-        return new_data_by_task_uuid
+                # task is None, count as completed.
+                # FIXME: failure may or may not be terminal, should we reload the task?
+                pass
 
     def is_root_complete(self) -> bool:
         # Need to override this to avoid accessing DB from broker processor thread
@@ -212,42 +172,60 @@ class KeeperEventAggregator(AbstractFireXEventAggregator):
         if self.root_task_uuid is not None:
             return # root already set by previous event.
 
-        self.root_task_uuid  = next(
+        self.root_task_uuid = next(
             (e.get('root_id') for e in events
              if e.get('type') == 'task-received' and e.get('root_id')),
             None
         )
+        if not self.root_task_uuid:
+            self.root_task_uuid = next(
+                (e.get('uuid') for e in events
+                if e.get('parent_id') is None and e.get('uuid')),
+                None
+            )
+        if not self.root_task_uuid:
+            self.root_task_uuid = next(
+                (e.get('uuid') for e in events),
+                None
+            )
+
+        if self.root_task_uuid:
+            self.run_db_manager.set_root_uuid(self.root_task_uuid)
 
     def _task_exists(self, task_uuid: str) -> bool:
         if not task_uuid:
             return False
-        return task_uuid in self.maybe_tasks_by_uuid
+        if task_uuid in self.maybe_tasks_by_uuid:
+            return True
+        return bool(self._query_task_by_uuid(task_uuid))
+
+    def _query_task_by_uuid(self, task_uuid: str) -> Optional[dict[str, Any]]:
+        tasks = self.run_db_manager.query_tasks(task_by_uuid_exp(task_uuid))
+        if not tasks:
+            return None
+        return tasks[0]._asdict()
 
     def _get_task(self, task_uuid: str) -> Optional[dict[str, Any]]:
-        if task_uuid not in self.maybe_tasks_by_uuid:
-            return None
-
-        maybe_task = self.maybe_tasks_by_uuid[task_uuid]
+        maybe_task = self.maybe_tasks_by_uuid.get(task_uuid)
         if maybe_task is not None:
             return maybe_task
-
-        # Task must be complete, read it from the DB.
-        tasks = self.run_db_manager.query_tasks(task_by_uuid_exp(task_uuid))
-        tasks_count = len(tasks)
-        assert tasks_count == 1, f'Expected exactly 1 task with UUID {task_uuid}, found: {tasks_count}'
-        return tasks[0]._asdict()
+        return self._query_task_by_uuid(task_uuid)
 
     def _get_incomplete_tasks(self) -> list[dict[str, Any]]:
         return [
-            task for task in self.maybe_tasks_by_uuid.values()
+            self._query_task_by_uuid(uuid)
+            for uuid, task in self.maybe_tasks_by_uuid.items()
             # Only incomplete tasks are kept in memory, complete tasks are None.
             if task is not None
         ]
 
-    def _insert_new_task(self, task: dict[str, Any]) -> None:
+    def _insert_new_task(self, task: dict[str, Any]) -> dict[str, Any]:
         assert 'uuid' in task, f'Cannot insert task without uuid: {task}'
-        assert not self._task_exists(task['uuid']), f'Task already exists, cannot insert: {task}'
-        self.maybe_tasks_by_uuid[task['uuid']] = task
+        task['firex_id'] = self.firex_id
+        return self.run_db_manager.insert_task(task)
+
+    def _update_task(self, task_uuid: str, full_task: dict[str, Any], changed_data: dict[str, Any]) -> None:
+        self.run_db_manager.update_task(task_uuid, changed_data)
 
 
 class TaskDatabaseAggregatorThread(BrokerEventConsumerThread):
@@ -277,3 +255,100 @@ class TaskDatabaseAggregatorThread(BrokerEventConsumerThread):
 
     def _on_cleanup(self):
         self.event_writer.stop()
+
+from firexapp.events.model import get_task_data
+from firex_keeper.persist import RETRYING_DB_EXCEPTIONS, retry, connect_db, get_db_file
+from firex_keeper.db_model import firex_run_metadata, firex_tasks
+
+
+class WritingFireXRunDbManager(FireXRunDbManager, KeeperEventAggregator):
+
+    def __init__(self, run_logs_dir, firex_id):
+        self.run_logs_dir = run_logs_dir
+        self.firex_id = firex_id
+        self.written_celery_event_count = 0
+
+        db_conn = connect_db(get_db_file(self.run_logs_dir, new=True), read_only=False)
+        logger.info("Created DB connection.")
+        Path(get_keeper_query_ready_file_path(self.run_logs_dir)).touch()
+
+        FireXRunDbManager.__init__(self, db_conn)
+        KeeperEventAggregator.__init__(self, self, firex_id)
+
+        self.firex_id = firex_id
+        self.written_celery_event_count = 0
+
+    @staticmethod
+    def create_db_writer_from_run_metadata(run_metadata: FireXRunMetadata) -> 'WritingFireXRunDbManager':
+        db_writer = WritingFireXRunDbManager(run_metadata.logs_dir, run_metadata.firex_id)
+        try:
+            db_writer.insert_run_metadata(run_metadata)
+        except Exception:
+            db_writer.complete_writing()
+            raise
+
+        return db_writer
+
+    def aggregate_events_and_update_db(self, celery_events):
+        try:
+            self._insert_or_update_tasks(celery_events)
+        except sqlalchemy.exc.DatabaseError as e:
+            logger.exception(e)
+        else:
+            # log DB write progress, similar to Celery event receive progress logging.
+            for e in celery_events:
+                if self.written_celery_event_count % 100 == 0:
+                    logger.debug(
+                        'Updated Keeper DB with Celery event number '
+                        f'{self.written_celery_event_count} with task uuid: {e.get("uuid")}')
+                self.written_celery_event_count += 1
+
+    @retry(RETRYING_DB_EXCEPTIONS)
+    def insert_run_metadata(self, run_metadata: FireXRunMetadata) -> None:
+        # Root UUID is not available during initialization. Populated by first task event from celery.
+        self.db_conn.execute(firex_run_metadata.insert().values(**run_metadata._asdict()))
+
+    @retry(RETRYING_DB_EXCEPTIONS)
+    def _insert_or_update_tasks(self, celery_events):
+        with self.db_conn.begin():
+            # Note querying for existing tasks during event aggregation must occur
+            # within same DB transaction as insert/update, otherwise integrety errors
+            # can occur.
+            new_data_by_task_uuid = self.aggregate_events(celery_events)
+        # in memory tracking must only occur after DB transaction success.
+        self.update_in_memory_tasks(new_data_by_task_uuid)
+
+    def insert_task(self, task) -> dict[str, Any]:
+        modelled_task = get_task_data(task)
+        self.db_conn.execute(firex_tasks.insert().values(**modelled_task))
+        return modelled_task
+
+    def update_task(self, uuid, changed_data) -> None:
+        modelled_changed_data = get_task_data(changed_data)
+        if modelled_changed_data:
+            self.db_conn.execute(
+                firex_tasks.update().where(firex_tasks.c.uuid == uuid).values(**modelled_changed_data)
+            )
+
+    def set_root_uuid(self, root_uuid) -> None:
+        self.db_conn.execute(firex_run_metadata.update().values(root_uuid=root_uuid))
+
+    @retry(RETRYING_DB_EXCEPTIONS)
+    def _set_keeper_complete(self):
+        self.db_conn.execute(firex_run_metadata.update().values(keeper_complete=True))
+
+    def complete_writing(self):
+        # set all incomplete tasks to a terminal state since we'll never
+        # get any more celery events.
+        self.aggregate_events_and_update_db(self.generate_incomplete_events())
+
+        try:
+            self._set_keeper_complete()
+        except sqlalchemy.exc.DatabaseError as e:
+            logger.exception(e)
+
+        self.close() # close DB connection.
+
+        # TODO: confirm this won't affect cleanup operations.
+        # _remove_write_permissions(get_db_file(logs_dir, new=False))
+        Path(get_keeper_complete_file_path(self.run_logs_dir)).touch()

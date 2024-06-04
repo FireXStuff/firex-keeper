@@ -8,10 +8,11 @@ from sqlalchemy.exc import OperationalError
 
 from firexkit.result import ChainInterruptedException
 from firexapp.events.model import RunStates, FireXRunMetadata
-from firex_keeper.keeper_event_consumer import KeeperThreadedEventWriter
+from firex_keeper.keeper_event_consumer import KeeperThreadedEventWriter, WritingFireXRunDbManager, \
+    KeeperQueueEntryType
 from firex_keeper.persist import (
     task_by_uuid_exp, task_uuid_complete_exp, FireXWaitQueryExceeded,
-    get_db_file, get_db_manager
+    get_db_file
 )
 from firex_keeper import task_query
 from firex_keeper.keeper_helper import can_any_write
@@ -20,7 +21,7 @@ from firex_keeper.db_model import firex_tasks
 
 def __write_events(logs_dir, events):
     event_writer = KeeperThreadedEventWriter(
-        FireXRunMetadata('1', logs_dir, 'Noop', None),
+        FireXRunMetadata('FireX-1', logs_dir, 'Noop', None),
     )
 
     for e in events:
@@ -227,7 +228,6 @@ class FireXKeeperTests(unittest.TestCase):
                 ],
                 stop=False)
             self.assertTrue(can_any_write(get_db_file(logs_dir)))
-
             # Make sure that task 1 is not yet complete
             self.assertRaises(FireXWaitQueryExceeded, task_query.tasks_by_name, logs_dir, 'Noop',
                               wait_for_exp_exist=task_uuid_complete_exp('1'), max_wait=1, error_on_wait_exceeded=True)
@@ -332,41 +332,32 @@ class FireXKeeperTests(unittest.TestCase):
             tasks = task_query.tasks_by_name(logs_dir, 'Noop')
             self.assertEqual(1, len(tasks))
 
-    def test_write_retry_success(self,):
-        with (
-            tempfile.TemporaryDirectory() as tmpdirname,
-            get_db_manager(tmpdirname, new=True) as db_manager,
-            patch.object(Connection, 'execute') as mock_execute,
-        ):
-            # fail twice, then succeed, relying on retries.
-            mock_execute.side_effect = [
-                OperationalError('DB failed', params={}, orig=None),
-                OperationalError('DB failed', params={}, orig=None),
-                Connection.execute,
-            ]
+    def test_write_retry_success(self):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            db_writer = WritingFireXRunDbManager(tmpdirname, 'FireX-1')
+            unmocked_insert_task = db_writer.insert_task
+            with patch.object(db_writer, 'insert_task', wraps=db_writer.insert_task) as mock_insert:
+                # fail three, then succeed, relying on retries.
+                def _side_effect(*args, **kwargs):
+                    if mock_insert.call_count < 3:
+                        raise OperationalError('DB failed', params={}, orig=None)
+                    return unmocked_insert_task(*args, **kwargs)
+                mock_insert.side_effect = _side_effect
 
-            db_manager.insert_or_update_tasks(
-                {'1': {'uuid': '1', 'name': 'Noop'}},
-                root_uuid=None,
-                firex_id='FireX-1'
-            )
-            self.assertEqual(mock_execute.call_count, 3)
-
-    def test_write_retry_fail(self,):
-        with (
-            tempfile.TemporaryDirectory() as tmpdirname,
-            get_db_manager(tmpdirname, new=True) as db_manager,
-            patch.object(Connection, 'execute') as mock_execute,
-        ):
-            # fail twice, then succeed, relying on retries.
-            mock_execute.side_effect = [
-                OperationalError('DB failed', params={}, orig=None)
-                for _ in range(6)
-            ]
-            with self.assertRaises(OperationalError):
-                db_manager.insert_or_update_tasks(
-                    {'1': {'uuid': '1', 'name': 'Noop'}},
-                    root_uuid=None,
-                    firex_id='FireX-1'
+                db_writer.aggregate_events_and_update_db(
+                    [{'uuid': '1', 'name': 'Noop'}]
                 )
-            self.assertEqual(mock_execute.call_count, 5)
+                self.assertEqual(mock_insert.call_count, 3)
+
+    def test_write_retry_fail(self):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            db_writer = WritingFireXRunDbManager(tmpdirname, 'FireX-1')
+            with patch.object(db_writer, 'insert_task') as mock_insert:
+                # fail more times than we'll retry for.
+                mock_insert.side_effect = [
+                    OperationalError('DB failed', params={}, orig=None)
+                    for _ in range(6)
+                ]
+                db_writer.aggregate_events_and_update_db([{'uuid': '1', 'name': 'Noop'}])
+                self.assertEqual(mock_insert.call_count, 5)
+                self.assertEqual(db_writer.query_tasks(True), [])
