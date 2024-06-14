@@ -49,18 +49,21 @@ class KeeperThreadedEventWriter:
 
     def __init__(self, run_metadata):
         # The writer thread exclusively connects to the DB, so it creates the aggregating_writer.
-        # This class (and its thread) expose some aggregated data that DOES NOT rely on querying the DB.
-        # It's important only one thread accesses the DB.
-        # Though there is a dict read across threads, this is safe since only self._writing_thread writes.
+        # This class (and its thread) expose a subset of aggregated data that DOES NOT rely on querying the DB.
+        # It's important only one thread accesses the DB to avoid data corruption.
         self._aggregating_writer = None
+
+        # track if the writer thread has fully failed so we can fail early instead of queuing Celery
+        # events in memory indefinitely.
+        self._writer_fully_failed : bool = False
 
         self.celery_event_queue = queue.Queue()
         self._writing_thread = threading.Thread(target=self._write_events_from_queue, args=(run_metadata,))
         self._writing_thread.start()
 
     def _write_events_from_queue(self, run_metadata, sleep_after_events=2):
-        self._aggregating_writer = WritingFireXRunDbManager.create_db_writer_from_run_metadata(run_metadata)
         try:
+            self._aggregating_writer = WritingFireXRunDbManager.create_db_writer_from_run_metadata(run_metadata)
             while True:
                 # wait indefinitely for next item, either celery event or "stop" control signal.
                 queue_item = self.celery_event_queue.get()
@@ -84,8 +87,13 @@ class KeeperThreadedEventWriter:
                 # TODO: Would be nice if STOP message could interrupt this sleep
                 # to avoid shutdown delays.
                 sleep(sleep_after_events)
+        except:
+            logger.exception('Failed processing write queue entries.')
+            self._writer_fully_failed = True
+            raise # nowhere to go since this is expected to be the top of a thread.
         finally:
-            self._aggregating_writer.complete_writing()
+            if self._aggregating_writer:
+                self._aggregating_writer.complete_writing()
 
     def is_root_complete(self):
         # This method is (and must be) threadsafe and not access the DB.
@@ -95,10 +103,13 @@ class KeeperThreadedEventWriter:
         # This method is (and must be) threadsafe and not access the DB.
         return self._aggregating_writer and self._aggregating_writer.are_all_tasks_complete()
 
-    def queue_celery_event(self, celery_event):
+    def queue_celery_event(self, celery_event) -> bool:
         self.celery_event_queue.put(
             (KeeperQueueEntryType.CELERY_EVENT, celery_event),
         )
+        # Note this boolean refers to the state of the entire
+        # writer thread, not whether or not the input event was written.
+        return self._writer_fully_failed
 
     def stop(self):
         self.celery_event_queue.put(
@@ -244,10 +255,17 @@ class TaskDatabaseAggregatorThread(BrokerEventConsumerThread):
         return self.event_writer.are_all_tasks_complete()
 
     def _on_celery_event(self, event):
-        self.event_writer.queue_celery_event(event)
+        writer_fully_failed = self.event_writer.queue_celery_event(event)
+
         if self._event_count % 100 == 0:
             logger.debug(f'Received Celery event number {self._event_count} with task uuid: {event.get("uuid")}')
         self._event_count += 1
+
+        # stop event processing if we'll never write any events, otherwise
+        # all Celery events will collect in memory and possibly trigger the OOM.
+        if writer_fully_failed and self.celery_event_receiver:
+            logger.critical("Stopping Celery event receiver because the write thread has failed.")
+            self.celery_event_receiver.should_stop = True
 
     def _on_cleanup(self):
         self.event_writer.stop()
