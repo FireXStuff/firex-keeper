@@ -9,17 +9,18 @@ import threading
 from time import sleep
 from pathlib import Path
 from typing import Optional, Any
-from firexapp.common import wait_until
-
 
 from firexapp.events.broker_event_consumer import BrokerEventConsumerThread
 from firexapp.events.event_aggregator import DEFAULT_AGGREGATOR_CONFIG, AbstractFireXEventAggregator
-from firexapp.events.model import FireXRunMetadata
+from firexapp.events.model import FireXRunMetadata, get_task_data
 import sqlalchemy.exc
 from firexapp.events.model import COMPLETE_RUNSTATES
 
-from firex_keeper.persist import get_keeper_complete_file_path, \
-    task_by_uuid_exp, FireXRunDbManager, get_keeper_query_ready_file_path
+from firex_keeper.db_model import firex_run_metadata, firex_tasks
+from firex_keeper.persist import (get_keeper_complete_file_path,
+    task_by_uuid_exp, FireXRunDbManager, get_keeper_query_ready_file_path,
+    RETRYING_DB_EXCEPTIONS, retry, connect_db, get_db_file,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -50,20 +51,15 @@ class KeeperThreadedEventWriter:
         # The writer thread exclusively connects to the DB, so it creates the aggregating_writer.
         # This class (and its thread) expose some aggregated data that DOES NOT rely on querying the DB.
         # It's important only one thread accesses the DB.
-        # Though there is a dict read across threads, this is safe since only self.writing_thread writes.
-        self.aggregating_writer = None
+        # Though there is a dict read across threads, this is safe since only self._writing_thread writes.
+        self._aggregating_writer = None
 
         self.celery_event_queue = queue.Queue()
-        self.writing_thread = threading.Thread(target=self._write_events_from_queue, args=(run_metadata,))
-        self.writing_thread.start()
-
-        # It's important the constructor only returns when it's full initialized:
-        # when both the DB and aggregating_writer have been created.
-        aggregating_writer_set = wait_until(lambda: self.aggregating_writer is not None, timeout=5, sleep_for=0.1)
-        assert aggregating_writer_set, 'DB writing thread did not create event aggregator, DB creation may have failed.'
+        self._writing_thread = threading.Thread(target=self._write_events_from_queue, args=(run_metadata,))
+        self._writing_thread.start()
 
     def _write_events_from_queue(self, run_metadata, sleep_after_events=2):
-        self.aggregating_writer = WritingFireXRunDbManager.create_db_writer_from_run_metadata(run_metadata)
+        self._aggregating_writer = WritingFireXRunDbManager.create_db_writer_from_run_metadata(run_metadata)
         try:
             while True:
                 # wait indefinitely for next item, either celery event or "stop" control signal.
@@ -74,7 +70,7 @@ class KeeperThreadedEventWriter:
 
                 celery_events = [i[1] for i in queue_items if i[0] == KeeperQueueEntryType.CELERY_EVENT]
                 if celery_events:
-                    self.aggregating_writer.aggregate_events_and_update_db(celery_events)
+                    self._aggregating_writer.aggregate_events_and_update_db(celery_events)
                     for _ in celery_events:
                         self.celery_event_queue.task_done()
 
@@ -89,15 +85,15 @@ class KeeperThreadedEventWriter:
                 # to avoid shutdown delays.
                 sleep(sleep_after_events)
         finally:
-            self.aggregating_writer.complete_writing()
+            self._aggregating_writer.complete_writing()
 
     def is_root_complete(self):
         # This method is (and must be) threadsafe and not access the DB.
-        return self.aggregating_writer and self.aggregating_writer.is_root_complete()
+        return self._aggregating_writer and self._aggregating_writer.is_root_complete()
 
     def are_all_tasks_complete(self):
         # This method is (and must be) threadsafe and not access the DB.
-        return self.aggregating_writer and self.aggregating_writer.are_all_tasks_complete()
+        return self._aggregating_writer and self._aggregating_writer.are_all_tasks_complete()
 
     def queue_celery_event(self, celery_event):
         self.celery_event_queue.put(
@@ -108,7 +104,7 @@ class KeeperThreadedEventWriter:
         self.celery_event_queue.put(
             (KeeperQueueEntryType.STOP, None),
         )
-        self.writing_thread.join()
+        self._writing_thread.join()
 
 
 class KeeperEventAggregator(AbstractFireXEventAggregator):
@@ -255,10 +251,6 @@ class TaskDatabaseAggregatorThread(BrokerEventConsumerThread):
 
     def _on_cleanup(self):
         self.event_writer.stop()
-
-from firexapp.events.model import get_task_data
-from firex_keeper.persist import RETRYING_DB_EXCEPTIONS, retry, connect_db, get_db_file
-from firex_keeper.db_model import firex_run_metadata, firex_tasks
 
 
 class WritingFireXRunDbManager(FireXRunDbManager, KeeperEventAggregator):

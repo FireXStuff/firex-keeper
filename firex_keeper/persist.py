@@ -4,7 +4,6 @@ import os
 from typing import List
 from contextlib import contextmanager
 from time import perf_counter, sleep
-from pathlib import Path
 
 from firexapp.submit.uid import Uid
 from sqlalchemy import create_engine
