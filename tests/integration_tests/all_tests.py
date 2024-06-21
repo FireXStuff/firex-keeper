@@ -78,6 +78,13 @@ class CompleteTest(FlowTestConfiguration):
         keeper_complete = task_query.wait_on_keeper_complete(logs_dir)
         assert keeper_complete, "Keeper database is not complete."
 
+        all_tasks = task_query.all_tasks(logs_dir)
+        assert len(all_tasks) >= 2, f"Expected more than 2 tasks, found {len(all_tasks)}"
+
+        for t in all_tasks:
+            if t.state != RunStates.SUCCEEDED.value:
+                raise Exception(f"Task {t} did not succeed.")
+
     def assert_expected_return_code(self, ret_value):
         assert_is_good_run(ret_value)
 

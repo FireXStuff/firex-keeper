@@ -27,7 +27,7 @@ def _task_col_eq(task_col, val):
 
 def _wait_and_query(logs_dir, query, db_file_query_ready_timeout, **kwargs) -> List[FireXTask]:
     wait_on_keeper_query_ready(logs_dir, db_file_query_ready_timeout)
-    with get_db_manager(logs_dir, read_only=True) as db_manager:
+    with get_db_manager(logs_dir) as db_manager:
         return db_manager.query_tasks(query, **kwargs)
 
 

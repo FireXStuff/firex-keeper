@@ -6,11 +6,11 @@ from contextlib import contextmanager
 from time import perf_counter, sleep
 
 from firexapp.submit.uid import Uid
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.sql import select, and_
 from sqlalchemy.exc import OperationalError
 
-from firexapp.events.model import FireXTask, FireXRunMetadata, get_task_data, COMPLETE_RUNSTATES
+from firexapp.events.model import FireXTask, FireXRunMetadata, COMPLETE_RUNSTATES
 from firexapp.common import wait_until
 from firex_keeper.db_model import metadata, firex_run_metadata, firex_tasks
 
@@ -134,7 +134,7 @@ def is_keeper_db_query_ready(logs_dir: str) -> bool:
 def get_db_file(logs_dir: str, new=False) -> str:
     db_file = os.path.join(get_db_file_dir_path(logs_dir), 'firex_run.db')
     if new:
-        assert not os.path.exists(db_file), "Cannot create new DB file, it already exists: %s" % db_file
+        assert not os.path.exists(db_file), f"Cannot create new DB file, it already exists: {db_file}"
         db_file_parent = os.path.dirname(db_file)
         os.makedirs(db_file_parent, exist_ok=True)
     else:
@@ -143,12 +143,14 @@ def get_db_file(logs_dir: str, new=False) -> str:
 
 
 @contextmanager
-def get_db_manager(logs_dir, new=False, read_only=False):
-    "Get a DB manager for an existing keeper DB file."
+def get_db_manager(logs_dir):
+    "Get a query-only DB manager for an existing keeper DB file."
 
-    db_file = get_db_file(logs_dir, new=new)
-    is_run_complete = is_keeper_db_complete(logs_dir)
-    conn = connect_db(db_file, read_only=read_only, is_run_complete=is_run_complete)
+    conn = connect_db(
+        get_db_file(logs_dir),
+        read_only=True,
+        is_run_complete=is_keeper_db_complete(logs_dir),
+    )
     db_manager = FireXRunDbManager(conn)
     try:
         yield db_manager
@@ -205,7 +207,7 @@ class FireXRunDbManager:
                 logger.debug(f"Keeper query waited {wait_duration:.2f} secs for wait query to exist.")
 
     @retry(RETRYING_DB_EXCEPTIONS)
-    def query_tasks(self, exp, wait_for_exp_exist=None, max_wait=15, error_on_wait_exceeded=False) -> List[FireXTask]:
+    def query_tasks(self, exp, wait_for_exp_exist=None, max_wait=15, error_on_wait_exceeded=False) -> list[FireXTask]:
         if wait_for_exp_exist is not None:
             self.wait_before_query(wait_for_exp_exist, max_wait, error_on_wait_exceeded)
 

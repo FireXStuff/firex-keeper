@@ -104,3 +104,7 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# test outputs
+results/
+tests/unit_tests/test-reports/

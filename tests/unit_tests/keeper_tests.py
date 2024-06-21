@@ -2,14 +2,12 @@ import unittest
 import tempfile
 from multiprocessing import Process, Queue
 from unittest.mock import patch
-from sqlalchemy.engine.base import Connection
 from sqlalchemy.exc import OperationalError
 
 
 from firexkit.result import ChainInterruptedException
 from firexapp.events.model import RunStates, FireXRunMetadata
-from firex_keeper.keeper_event_consumer import KeeperThreadedEventWriter, WritingFireXRunDbManager, \
-    KeeperQueueEntryType
+from firex_keeper.keeper_event_consumer import KeeperThreadedEventWriter, WritingFireXRunDbManager
 from firex_keeper.persist import (
     task_by_uuid_exp, task_uuid_complete_exp, FireXWaitQueryExceeded,
     get_db_file
@@ -22,6 +20,7 @@ from firex_keeper.db_model import firex_tasks
 def __write_events(logs_dir, events):
     event_writer = KeeperThreadedEventWriter(
         FireXRunMetadata('FireX-1', logs_dir, 'Noop', None),
+        lambda r: None,
     )
 
     for e in events:
