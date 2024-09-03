@@ -33,7 +33,8 @@ def _wait_and_query(logs_dir, query, db_file_query_ready_timeout, **kwargs) -> L
 
 def _query_tasks(logs_dir, query, db_file_query_ready_timeout=15, copy_before_query=False, **kwargs) -> List[FireXTask]:
     if copy_before_query:
-        with TemporaryDirectory() as temp_log_dir:
+        tmp_base_dir = '/dev/shm' if os.path.isdir('/dev/shm') else None
+        with TemporaryDirectory(dir=tmp_base_dir) as temp_log_dir:
             existing_db_file = get_db_file(logs_dir, new=False)
             new_tmp_db_file = get_db_file(temp_log_dir, new=True)
 
