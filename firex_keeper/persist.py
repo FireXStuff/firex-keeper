@@ -9,6 +9,7 @@ from firexapp.submit.uid import Uid
 from sqlalchemy import create_engine, event
 from sqlalchemy.sql import select, and_
 from sqlalchemy.exc import OperationalError
+from sqlite3 import OperationalError as SqlLiteOperationalError
 
 from firexapp.events.model import FireXTask, FireXRunMetadata, COMPLETE_RUNSTATES
 from firexapp.common import wait_until
@@ -162,7 +163,7 @@ def _row_to_run_metadata(row):
     # The first 4 columns from the table make up a FireXRunMetadata.
     return FireXRunMetadata(*row[:4])
 
-RETRYING_DB_EXCEPTIONS = (OperationalError,)
+RETRYING_DB_EXCEPTIONS = (OperationalError, SqlLiteOperationalError)
 
 def retry(exceptions, max_attempts: int=5, retry_delay: int=1):
     def retry_decorator(func):
