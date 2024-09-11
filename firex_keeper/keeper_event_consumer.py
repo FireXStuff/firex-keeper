@@ -14,6 +14,7 @@ from firexapp.events.broker_event_consumer import BrokerEventConsumerThread
 from firexapp.events.event_aggregator import DEFAULT_AGGREGATOR_CONFIG, AbstractFireXEventAggregator
 from firexapp.events.model import FireXRunMetadata, get_task_data
 import sqlalchemy.exc
+from sqlite3 import DatabaseError as SqlLiteDatabaseError
 from firexapp.events.model import COMPLETE_RUNSTATES
 
 from firex_keeper.db_model import firex_run_metadata, firex_tasks
@@ -313,7 +314,7 @@ class WritingFireXRunDbManager(FireXRunDbManager, KeeperEventAggregator):
     def aggregate_events_and_update_db(self, celery_events):
         try:
             changed_uuids = self._insert_or_update_tasks(celery_events)
-        except sqlalchemy.exc.DatabaseError as e:
+        except (sqlalchemy.exc.DatabaseError, SqlLiteDatabaseError)  as e:
             logger.exception(e)
         else:
             # log DB write progress, similar to Celery event receive progress logging.
@@ -366,7 +367,7 @@ class WritingFireXRunDbManager(FireXRunDbManager, KeeperEventAggregator):
 
         try:
             self._set_keeper_complete()
-        except sqlalchemy.exc.DatabaseError as e:
+        except (sqlalchemy.exc.DatabaseError, SqlLiteDatabaseError) as e:
             logger.exception(e)
 
         self.close() # close DB connection.

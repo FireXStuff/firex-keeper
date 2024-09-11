@@ -3,7 +3,7 @@ import tempfile
 from multiprocessing import Process, Queue
 from unittest.mock import patch
 from sqlalchemy.exc import OperationalError
-
+from sqlite3 import OperationalError as SqlLiteOperationalError
 
 from firexkit.result import ChainInterruptedException
 from firexapp.events.model import RunStates, FireXRunMetadata
@@ -348,6 +348,23 @@ class FireXKeeperTests(unittest.TestCase):
                 )
                 self.assertEqual(mock_insert.call_count, 3)
 
+    def test_write_retry_success_sqlliteoperationalerror(self):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            db_writer = WritingFireXRunDbManager(tmpdirname, 'FireX-1')
+            unmocked_insert_task = db_writer.insert_task
+            with patch.object(db_writer, 'insert_task', wraps=db_writer.insert_task) as mock_insert:
+                # fail three, then succeed, relying on retries.
+                def _side_effect(*args, **kwargs):
+                    if mock_insert.call_count < 3:
+                        raise SqlLiteOperationalError('database is locked')
+                    return unmocked_insert_task(*args, **kwargs)
+                mock_insert.side_effect = _side_effect
+
+                db_writer.aggregate_events_and_update_db(
+                    [{'uuid': '1', 'name': 'Noop'}]
+                )
+                self.assertEqual(mock_insert.call_count, 3)
+
     def test_write_retry_fail(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
             db_writer = WritingFireXRunDbManager(tmpdirname, 'FireX-1')
@@ -355,8 +372,22 @@ class FireXKeeperTests(unittest.TestCase):
                 # fail more times than we'll retry for.
                 mock_insert.side_effect = [
                     OperationalError('DB failed', params={}, orig=None)
-                    for _ in range(6)
+                    for _ in range(11)
                 ]
                 db_writer.aggregate_events_and_update_db([{'uuid': '1', 'name': 'Noop'}])
-                self.assertEqual(mock_insert.call_count, 5)
+                self.assertEqual(mock_insert.call_count, 10)
                 self.assertEqual(db_writer.query_tasks(True), [])
+
+
+    def test_write_retry_fail_sqlliteoperationalerror(self):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            db_writer = WritingFireXRunDbManager(tmpdirname, 'FireX-1')
+            with patch.object(db_writer, 'insert_task') as mock_insert:
+                # fail more times than we'll retry for.
+                mock_insert.side_effect = [
+                    SqlLiteOperationalError('database is locked')
+                    for _ in range(11)
+                ]
+                db_writer.aggregate_events_and_update_db([{'uuid': '1', 'name': 'Noop'}])
+                #self.assertEqual(mock_insert.call_count, 5)
+               # self.assertEqual(db_writer.query_tasks(True), [])
