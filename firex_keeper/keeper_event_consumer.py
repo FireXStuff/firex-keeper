@@ -12,7 +12,7 @@ from typing import Optional, Any
 
 from firexapp.events.broker_event_consumer import BrokerEventConsumerThread
 from firexapp.events.event_aggregator import DEFAULT_AGGREGATOR_CONFIG, AbstractFireXEventAggregator
-from firexapp.events.model import FireXRunMetadata, get_task_data
+from firexapp.events.model import FireXRunMetadata, get_task_data, RunMetadataColumn
 import sqlalchemy.exc
 from sqlite3 import DatabaseError as SqlLiteDatabaseError
 from firexapp.events.model import COMPLETE_RUNSTATES
@@ -328,7 +328,12 @@ class WritingFireXRunDbManager(FireXRunDbManager, KeeperEventAggregator):
     @retry(RETRYING_DB_EXCEPTIONS)
     def insert_run_metadata(self, run_metadata: FireXRunMetadata) -> None:
         # Root UUID is not available during initialization. Populated by first task event from celery.
-        self.db_conn.execute(firex_run_metadata.insert().values(**run_metadata._asdict()))
+        run_metadata_to_insert = run_metadata._asdict()
+        if RunMetadataColumn.FIREX_REQUESTER.value in run_metadata_to_insert:
+            # Until we add a FIREX_REQUESTER Column in db_model.firex_run_metadata, a
+            # we can't insert it. Adding the column now will not be backward compatible.
+            del run_metadata_to_insert[RunMetadataColumn.FIREX_REQUESTER.value]
+        self.db_conn.execute(firex_run_metadata.insert().values(**run_metadata_to_insert))
 
     @retry(RETRYING_DB_EXCEPTIONS)
     def _insert_or_update_tasks(self, celery_events) -> list[str]:

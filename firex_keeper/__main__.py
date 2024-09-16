@@ -40,7 +40,7 @@ def init_keeper():
 
     args = parser.parse_args()
 
-    run_metadata = FireXRunMetadata(args.uid, args.logs_dir, args.chain, None)
+    run_metadata = FireXRunMetadata(args.uid, args.logs_dir, args.chain, None, firex_requester=None)
 
     keeper_dir = get_keeper_dir(run_metadata.logs_dir)
     os.makedirs(keeper_dir, exist_ok=True)

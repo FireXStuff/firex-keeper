@@ -19,7 +19,7 @@ from firex_keeper.db_model import firex_tasks
 
 def __write_events(logs_dir, events):
     event_writer = KeeperThreadedEventWriter(
-        FireXRunMetadata('FireX-1', logs_dir, 'Noop', None),
+        FireXRunMetadata('FireX-1', logs_dir, 'Noop', None, firex_requester=None),
         lambda r: None,
     )
 

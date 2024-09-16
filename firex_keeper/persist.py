@@ -161,7 +161,9 @@ def get_db_manager(logs_dir):
 
 def _row_to_run_metadata(row):
     # The first 4 columns from the table make up a FireXRunMetadata.
-    return FireXRunMetadata(*row[:4])
+    # Need to set firex_requester explicitly since it's not in the db_mode.firex_run_metadata
+    # Can't add the Column now as it won't be backward compatible
+    return FireXRunMetadata(*row[:4], firex_requester=None)
 
 RETRYING_DB_EXCEPTIONS = (OperationalError, SqlLiteOperationalError)
 
