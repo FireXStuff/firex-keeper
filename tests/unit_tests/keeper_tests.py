@@ -10,7 +10,7 @@ from firexapp.events.model import RunStates, FireXRunMetadata
 from firex_keeper.keeper_event_consumer import KeeperThreadedEventWriter, WritingFireXRunDbManager
 from firex_keeper.persist import (
     task_by_uuid_exp, task_uuid_complete_exp, FireXWaitQueryExceeded,
-    get_db_file
+    get_db_file, DEFAULT_MAX_RETRY_ATTEMPTS
 )
 from firex_keeper import task_query
 from firex_keeper.keeper_helper import can_any_write
@@ -372,10 +372,10 @@ class FireXKeeperTests(unittest.TestCase):
                 # fail more times than we'll retry for.
                 mock_insert.side_effect = [
                     OperationalError('DB failed', params={}, orig=None)
-                    for _ in range(11)
+                    for _ in range(DEFAULT_MAX_RETRY_ATTEMPTS + 1)
                 ]
                 db_writer.aggregate_events_and_update_db([{'uuid': '1', 'name': 'Noop'}])
-                self.assertEqual(mock_insert.call_count, 10)
+                self.assertEqual(mock_insert.call_count, DEFAULT_MAX_RETRY_ATTEMPTS)
                 self.assertEqual(db_writer.query_tasks(True), [])
 
 
@@ -386,8 +386,8 @@ class FireXKeeperTests(unittest.TestCase):
                 # fail more times than we'll retry for.
                 mock_insert.side_effect = [
                     SqlLiteOperationalError('database is locked')
-                    for _ in range(11)
+                    for _ in range(DEFAULT_MAX_RETRY_ATTEMPTS + 1)
                 ]
                 db_writer.aggregate_events_and_update_db([{'uuid': '1', 'name': 'Noop'}])
-                #self.assertEqual(mock_insert.call_count, 5)
-               # self.assertEqual(db_writer.query_tasks(True), [])
+                self.assertEqual(mock_insert.call_count, DEFAULT_MAX_RETRY_ATTEMPTS)
+                self.assertEqual(db_writer.query_tasks(True), [])

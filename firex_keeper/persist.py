@@ -166,8 +166,9 @@ def _row_to_run_metadata(row):
     return FireXRunMetadata(*row[:4], firex_requester=None)
 
 RETRYING_DB_EXCEPTIONS = (OperationalError, SqlLiteOperationalError)
+DEFAULT_MAX_RETRY_ATTEMPTS = 20
 
-def retry(exceptions, max_attempts: int=20, retry_delay: int=1):
+def retry(exceptions, max_attempts: int=DEFAULT_MAX_RETRY_ATTEMPTS, retry_delay: int=1):
     def retry_decorator(func):
         def retrying_wrapper(*args, **kwargs):
             attempt = 0
