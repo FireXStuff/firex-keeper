@@ -167,7 +167,7 @@ def _row_to_run_metadata(row):
 
 RETRYING_DB_EXCEPTIONS = (OperationalError, SqlLiteOperationalError)
 
-def retry(exceptions, max_attempts: int=10, retry_delay: int=1):
+def retry(exceptions, max_attempts: int=20, retry_delay: int=1):
     def retry_decorator(func):
         def retrying_wrapper(*args, **kwargs):
             attempt = 0
