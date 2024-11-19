@@ -1,5 +1,5 @@
 import logging
-from typing import List
+from typing import List, Optional
 import os
 from tempfile import TemporaryDirectory
 import shutil
@@ -12,7 +12,8 @@ from firex_keeper.persist import get_db_manager, task_by_uuid_exp, get_keeper_co
     get_db_file, get_keeper_query_ready_file_path
 from firex_keeper.keeper_helper import FireXTreeTask
 from firexapp.common import wait_until
-from sqlalchemy.sql import and_
+from sqlalchemy.sql import and_, select
+from sqlalchemy import literal
 
 logger = logging.getLogger(__name__)
 
@@ -145,39 +146,66 @@ def _get_tree_tasks_by_uuid(root_uuid, tasks_by_uuid):
 
     child_ids_by_parent_id = _child_ids_by_parent_id(tasks_by_uuid)
 
-    uuids_to_add = [root_uuid]
     tree_tasks_by_uuid = {}
+    if root_uuid in tasks_by_uuid:
+        uuids_to_add = [root_uuid]
+        while uuids_to_add:
+            cur_task_uuid = uuids_to_add.pop()
+            cur_task = tasks_by_uuid[cur_task_uuid]
+            parent_tree_task = tree_tasks_by_uuid.get(cur_task.parent_id, None)
 
-    while uuids_to_add:
-        cur_task_uuid = uuids_to_add.pop()
-        cur_task = tasks_by_uuid[cur_task_uuid]
-        parent_tree_task = tree_tasks_by_uuid.get(cur_task.parent_id, None)
+            cur_tree_task = FireXTreeTask(**{**cur_task._asdict(), 'children': [], 'parent': parent_tree_task})
+            if parent_tree_task:
+                parent_tree_task.children.append(cur_tree_task)
+            tree_tasks_by_uuid[cur_tree_task.uuid] = cur_tree_task
 
-        cur_tree_task = FireXTreeTask(**{**cur_task._asdict(), 'children': [], 'parent': parent_tree_task})
-        if parent_tree_task:
-            parent_tree_task.children.append(cur_tree_task)
-        tree_tasks_by_uuid[cur_tree_task.uuid] = cur_tree_task
-
-        uuids_to_add += child_ids_by_parent_id[cur_tree_task.uuid]
+            uuids_to_add += child_ids_by_parent_id[cur_tree_task.uuid]
 
     return tree_tasks_by_uuid
 
 
-def _tasks_to_tree(root_uuid, tasks_by_uuid) -> FireXTreeTask:
-    return _get_tree_tasks_by_uuid(root_uuid, tasks_by_uuid)[root_uuid]
-
-
-def task_tree(logs_dir, root_uuid=None, **kwargs) -> FireXTreeTask:
+def _create_task_tree(logs_dir, root_uuid=None, **kwargs) -> Optional[FireXTreeTask]:
     with get_db_manager(logs_dir) as db_manager:
         if root_uuid is None:
             root_uuid = db_manager.query_single_run_metadata().root_uuid
 
-        # TODO: could avoid fetching all tasks by using sqlite recursive query.
-        all_tasks_by_uuid = {t.uuid: t for t in db_manager.query_tasks(True, **kwargs)}
+        descendant_task_uuids = select(
+            literal(root_uuid).label("uuid")
+        ).cte("descendant_task_uuids", recursive=True)
 
-    if root_uuid not in all_tasks_by_uuid:
-        return None
-    return _tasks_to_tree(root_uuid, all_tasks_by_uuid)
+        descendant_uuids = (
+            select(firex_tasks.c.uuid)
+            .join(
+                descendant_task_uuids,
+                firex_tasks.c.parent_id == descendant_task_uuids.c.uuid)
+        )
+
+        # Approx SQL, uses index on parent_id.
+        # WITH RECURSIVE descendant_task_uuids(uuid) AS (
+        #   SELECT :param_1 AS uuid
+        #   UNION
+        #   SELECT firex_tasks.uuid AS uuid
+        #   FROM firex_tasks
+        #   JOIN descendant_task_uuids ON firex_tasks.parent_id = descendant_task_uuids.uuid
+        # )
+        # SELECT firex_tasks.*
+        # FROM firex_tasks
+        # WHERE firex_tasks.uuid IN (
+        #   SELECT uuid FROM descendant_task_uuids
+        # )
+        final_stmt = select(firex_tasks).where(
+            firex_tasks.c.uuid.in_(
+                select(
+                    descendant_task_uuids.union(descendant_uuids))
+            )
+        )
+
+        root_and_descendant_tasks = db_manager.query_tasks(final_stmt, **kwargs)
+
+    return _get_tree_tasks_by_uuid(
+        root_uuid,
+        {t.uuid: t for t in root_and_descendant_tasks},
+    ).get(root_uuid) # root_uuid might not be in task table.
 
 
 def task_tree_to_task(task_tree: FireXTreeTask) -> FireXTask:
@@ -199,7 +227,16 @@ def flatten_tree(task_tree: FireXTreeTask) -> List[FireXTreeTask]:
 
 
 def get_descendants(logs_dir, uuid) -> List[FireXTreeTask]:
-    subtree = task_tree(logs_dir, root_uuid=uuid)
+    # TODO: historically a FireXTreeTask was returned because
+    # the graph needed to be created within the application anyways.
+    # Now that sqlite recursive query is managing the tree,
+    # it's no longer necessary to create the graph in memory
+    # unless the caller actually needs it, which many currently don't
+    # (i.e. most call sites don't use "children" or "parent")
+    # Therefore an optimization is possible to query descendants
+    # but return a FireXTask, skipping application-side tree creation.
+
+    subtree = _create_task_tree(logs_dir, root_uuid=uuid)
     # None if UUID isn't found.
     if subtree is None:
         return []

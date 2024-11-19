@@ -8,6 +8,7 @@ from time import perf_counter, sleep
 from firexapp.submit.uid import Uid
 from sqlalchemy import create_engine, event
 from sqlalchemy.sql import select, and_
+from sqlalchemy.sql.selectable import Select
 from sqlalchemy.exc import OperationalError
 from sqlite3 import OperationalError as SqlLiteOperationalError
 
@@ -215,7 +216,12 @@ class FireXRunDbManager:
         if wait_for_exp_exist is not None:
             self.wait_before_query(wait_for_exp_exist, max_wait, error_on_wait_exceeded)
 
-        db_result = self.db_conn.execute(select([firex_tasks]).where(exp))
+        if isinstance(exp, Select):
+            select_stmt = exp
+        else:
+            select_stmt = select([firex_tasks]).where(exp)
+
+        db_result = self.db_conn.execute(select_stmt)
         result_tasks = []
         for row in db_result:
             try:

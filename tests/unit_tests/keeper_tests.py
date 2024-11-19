@@ -148,7 +148,7 @@ class FireXKeeperTests(unittest.TestCase):
             logs_dir = str(tmpdirname)
             _write_events_to_db(logs_dir, tree_events)
 
-            tree = task_query.task_tree(logs_dir, root_uuid='3')
+            tree = task_query._create_task_tree(logs_dir, root_uuid='3')
             child_uuids = {t.uuid for t in tree.children}
             self.assertEqual({'4', '5'}, child_uuids)
 
@@ -157,7 +157,7 @@ class FireXKeeperTests(unittest.TestCase):
             logs_dir = str(tmpdirname)
             _write_events_to_db(logs_dir, tree_events)
 
-            tree = task_query.task_tree(logs_dir, root_uuid='not exists')
+            tree = task_query._create_task_tree(logs_dir, root_uuid='not exists')
             self.assertIsNone(tree)
 
     def test_get_decendants(self):
@@ -182,7 +182,7 @@ class FireXKeeperTests(unittest.TestCase):
             logs_dir = str(tmpdirname)
             _write_events_to_db(logs_dir, tree_events)
 
-            tree = task_query.task_tree(logs_dir)
+            tree = task_query._create_task_tree(logs_dir)
             causing_task = task_query.find_task_causing_chain_exception(tree)
             self.assertEqual('4', causing_task.uuid)
 

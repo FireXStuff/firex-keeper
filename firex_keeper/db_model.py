@@ -1,4 +1,4 @@
-from sqlalchemy import Table, Column, Integer, String, MetaData, ForeignKey, Boolean, Float, Text
+from sqlalchemy import Table, Column, Integer, String, MetaData, ForeignKey, Boolean, Float, Text, Index
 from sqlalchemy.types import JSON
 
 from firexapp.events.model import RunMetadataColumn, TaskColumn
@@ -57,3 +57,5 @@ TASK_COLUMNS = [Column(tc.value,
 TASKS_TABLENAME = 'firex_tasks'
 firex_tasks = Table(TASKS_TABLENAME, metadata, *TASK_COLUMNS)
 
+Index("task_parent_index", firex_tasks.c.parent_id) # for descendants query
+Index("task_name_index", firex_tasks.c.name) # commonly queried
