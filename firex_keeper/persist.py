@@ -47,21 +47,35 @@ def _custom_json_loads(*args, **kwargs):
     return json.loads(*args, **kwargs)
 
 
-def _get_pragmas(use_wal):
-    pragmas = [ 'page_size = 4096' ]
-    if use_wal:
-        pragmas += [
-            'journal_mode=WAL', 'synchronous=NORMAL',
-        ]
+def _get_pragmas(busy_timeout):
+    pragmas = [
+        'synchronous=NORMAL', # FULL is probably not necessary.
+
+        # TODO: consider experimenting with:
+        # 'page_size=4096',
+        # "mmap_size=10485760", # 10 megabytes
+        # "cache_size=5000",
+    ]
+    if busy_timeout:
+        # how long to wait for a lock.
+        pragmas.append(f'busy_timeout={busy_timeout}')
+
+    #  WAL should not be used while concurrent read+write NFS access is still possible. Once all reads go through
+    #   keeper process for in-progress runs, WAL is likely preferable for in-progress runs, then after the DB
+    #   should be read-only and therefore safe for direct NFS access (immutable=1).
+    # use_wal=False
+    # if use_wal:
+    #     pragmas.append('journal_mode=WAL')
+
     return pragmas
 
 
-def execute_pragmas(engine, use_wal=False):
+def execute_pragmas(engine, pragmas: list[str]):
     dbapi_connection = engine.raw_connection()
     try:
         cursor = dbapi_connection.cursor()
-        for pragma in _get_pragmas(use_wal):
-            cmd = 'PRAGMA ' + pragma
+        for pragma in pragmas:
+            cmd = f'PRAGMA {pragma}'
             logger.debug(f"Executing: {cmd}")
             cursor.execute(cmd)
         cursor.close()
@@ -77,7 +91,7 @@ def _db_connection_str(db_file, read_only, is_run_complete=False):
 
     if is_run_complete:
         params['immutable'] = '1'
-        read_only = True
+        read_only = True # probably not necessary since immutable=1
 
     if read_only:
         params['mode'] = 'ro'
@@ -88,22 +102,50 @@ def _db_connection_str(db_file, read_only, is_run_complete=False):
 
     return db_conn_str
 
-
-def connect_db(db_file, read_only=False, metadata_to_create=metadata, is_run_complete=False):
+def _create_keeper_engine(db_file, read_only, is_run_complete):
     engine = create_engine(
-        _db_connection_str(db_file, read_only, is_run_complete=is_run_complete),
+        _db_connection_str(db_file, read_only, is_run_complete),
         json_deserializer=_custom_json_loads,
     )
 
-    if not os.path.exists(db_file):
-        #  WAL should not be used while concurrent read+write NFS access is still possible. Once all reads go through
-        #   keeper process for in-progress runs, WAL is likely preferable for in-progress runs, then after the DB
-        #   should be read-only and therefore safe for direct NFS access.
-        execute_pragmas(engine, use_wal=False)
+    @event.listens_for(engine, "connect")
+    def do_connect(dbapi_connection, _):
+        # disable pysqlite's emitting of the BEGIN statement entirely.
+        # also stops it from emitting COMMIT before any DDL.
+        dbapi_connection.isolation_level = None
 
-        logger.info("Creating schema for %s" % db_file)
+    # start writes immediately to avoid failing to elevate to write lock
+    # Keeper does writes in single thread, so no writer lock contention
+    # is ever expected.
+    immediate = not read_only
+    @event.listens_for(engine, "begin")
+    def do_begin(conn):
+        conn.execute(f"BEGIN{' IMMEDIATE' if immediate else ''}")
+
+    return engine
+
+
+def connect_db(
+    db_file,
+    read_only=False,
+    metadata_to_create=metadata,
+    is_run_complete=False,
+    busy_timeout=None,
+):
+    engine = _create_keeper_engine(db_file, read_only, is_run_complete)
+
+    if not os.path.exists(db_file):
+        assert not read_only, f"Cannot connect to read-only file that does not exist: {db_file}"
+
+        logger.info(f"Creating schema for {db_file}")
         metadata_to_create.create_all(engine)
-        logger.info("Schema creation complete for %s" % db_file)
+        logger.info(f"Schema creation complete for {db_file}")
+
+    if busy_timeout is None:
+        # wait longer for writers than readers to help ensure
+        # write lock is obtained
+        busy_timeout = 2000 if read_only else 5000
+    execute_pragmas(engine, _get_pragmas(busy_timeout))
 
     return engine.connect()
 
@@ -166,6 +208,11 @@ def _row_to_run_metadata(row):
     # Can't add the Column now as it won't be backward compatible
     return FireXRunMetadata(*row[:4], firex_requester=None)
 
+
+# FIXME: these retries should no longer be necessary due to writer connections
+# obtaining write lock immediately via 'BEGIN IMMEDIATE' and readers having +2x
+# longer busy_timeout than writer. But a stress test is needed before the retries
+# should be removed.
 RETRYING_DB_EXCEPTIONS = (OperationalError, SqlLiteOperationalError)
 DEFAULT_MAX_RETRY_ATTEMPTS = 20
 
