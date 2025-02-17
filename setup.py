@@ -17,6 +17,7 @@ setup(name='firex_keeper',
       install_requires=[
             'firexapp',
             'SQLAlchemy<2',
+
       ],
       entry_points={
           'console_scripts': [
