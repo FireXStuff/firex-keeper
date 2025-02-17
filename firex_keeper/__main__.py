@@ -44,9 +44,12 @@ def init_keeper():
 
     keeper_dir = get_keeper_dir(run_metadata.logs_dir)
     os.makedirs(keeper_dir, exist_ok=True)
-    logging.basicConfig(filename=os.path.join(keeper_dir, 'keeper.log.txt'), level=logging.DEBUG, filemode='w',
-                        format='[%(asctime)s %(levelname)s] %(message)s', datefmt="%Y-%m-%d %H:%M:%S")
-    logger.info('Starting Keeper with args: %s' % args)
+    logging.basicConfig(
+        filename=os.path.join(keeper_dir, 'keeper.log.txt'),
+        level=logging.DEBUG,
+        format='[%(asctime)s %(levelname)s] %(message)s',
+        datefmt="%Y-%m-%d %H:%M:%S")
+    logger.info(f'Starting Keeper with args: {args}')
 
     signal.signal(signal.SIGTERM, _sig_handler)
 

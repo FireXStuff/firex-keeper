@@ -137,7 +137,7 @@ def _child_ids_by_parent_id(tasks_by_uuid):
     return child_uuids_by_parent_id
 
 
-def _get_tree_tasks_by_uuid(root_uuid, tasks_by_uuid):
+def _get_tree_tasks_by_uuid(root_uuid, tasks_by_uuid) -> dict[str, FireXTreeTask]:
     if root_uuid is None:
         root_uuid = next((t.uuid for t in tasks_by_uuid.values() if t.parent_id is None), None)
         # FIXME: handle multiple roots?
@@ -154,7 +154,11 @@ def _get_tree_tasks_by_uuid(root_uuid, tasks_by_uuid):
             cur_task = tasks_by_uuid[cur_task_uuid]
             parent_tree_task = tree_tasks_by_uuid.get(cur_task.parent_id, None)
 
-            cur_tree_task = FireXTreeTask(**{**cur_task._asdict(), 'children': [], 'parent': parent_tree_task})
+            cur_tree_task = FireXTreeTask(
+                **(
+                    cur_task._asdict() | {'children': [], 'parent': parent_tree_task}
+                )
+            )
             if parent_tree_task:
                 parent_tree_task.children.append(cur_tree_task)
             tree_tasks_by_uuid[cur_tree_task.uuid] = cur_tree_task
@@ -243,7 +247,12 @@ def get_descendants(logs_dir, uuid) -> List[FireXTreeTask]:
     return [t for t in flatten_tree(subtree) if t.uuid != uuid]
 
 
-def ancestor_by_long_name(logs_dir, uuid, ancestor_long_name, **kwargs) -> FireXTreeTask:
+def ancestor_by_long_name(
+    logs_dir,
+    uuid,
+    ancestor_long_name,
+    **kwargs,
+) -> Optional[FireXTreeTask]:
     tasks_by_uuid = {t.uuid: t for t in all_tasks(logs_dir, **kwargs)}
     # TODO: could avoid fetching all tasks by using sqlite recursive query.
     tree_tasks_by_uuid = _get_tree_tasks_by_uuid(None, tasks_by_uuid)
@@ -251,13 +260,17 @@ def ancestor_by_long_name(logs_dir, uuid, ancestor_long_name, **kwargs) -> FireX
         tree_task = tree_tasks_by_uuid[uuid]
         while tree_task.parent and tree_task.parent.long_name != ancestor_long_name:
             tree_task = tree_task.parent
-        if tree_task.parent.long_name == ancestor_long_name:
+
+        if (
+            tree_task.parent
+            and tree_task.parent.long_name == ancestor_long_name
+        ):
             return tree_task.parent
     return None
 
 
 def find_task_causing_chain_exception(task: FireXTreeTask):
-    assert task.exception, "Expected exception, received: %s" % task.exception
+    assert task.exception, f"Expected exception, received: {task.exception}"
 
     if not is_chain_exception(task) or not task.children:
         return task

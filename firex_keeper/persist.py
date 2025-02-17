@@ -32,6 +32,10 @@ def task_uuid_complete_exp(task_uuid):
                 firex_tasks.c.state.in_(COMPLETE_RUNSTATES))
 
 
+def task_by_name_exp(task_name):
+    return firex_tasks.c.name == task_name
+
+
 def cur_task_by_uuid_exp():
     from celery import current_task
     if not current_task:
@@ -70,18 +74,13 @@ def _get_pragmas(busy_timeout):
     return pragmas
 
 
-def execute_pragmas(engine, pragmas: list[str]):
-    dbapi_connection = engine.raw_connection()
-    try:
-        cursor = dbapi_connection.cursor()
-        for pragma in pragmas:
-            cmd = f'PRAGMA {pragma}'
-            logger.debug(f"Executing: {cmd}")
-            cursor.execute(cmd)
-        cursor.close()
-        dbapi_connection.commit()
-    finally:
-        dbapi_connection.close()
+def execute_pragmas(dbapi_connection, pragmas: list[str]):
+    cursor = dbapi_connection.cursor()
+    for pragma in pragmas:
+        cmd = f'PRAGMA {pragma}'
+        logger.debug(f"Executing: {cmd}")
+        cursor.execute(cmd)
+    cursor.close()
 
 
 def _db_connection_str(db_file, read_only, is_run_complete=False):
@@ -126,11 +125,10 @@ def _create_keeper_engine(db_file, read_only, is_run_complete):
 
 
 def connect_db(
-    db_file,
-    read_only=False,
+    db_file: str,
+    read_only: bool,
     metadata_to_create=metadata,
     is_run_complete=False,
-    busy_timeout=None,
 ):
     engine = _create_keeper_engine(db_file, read_only, is_run_complete)
 
@@ -141,13 +139,16 @@ def connect_db(
         metadata_to_create.create_all(engine)
         logger.info(f"Schema creation complete for {db_file}")
 
-    if busy_timeout is None:
-        # wait longer for writers than readers to help ensure
-        # write lock is obtained
-        busy_timeout = 2000 if read_only else 5000
-    execute_pragmas(engine, _get_pragmas(busy_timeout))
+    # wait longer for writers than readers to help ensure
+    # write lock is obtained
+    busy_timeout = 2000 if read_only else 5000
 
-    return engine.connect()
+    connection = engine.connect()
+    execute_pragmas(
+        connection.connection, # pragma execution requires internal (dbapi) connection.
+        _get_pragmas(busy_timeout))
+
+    return connection
 
 
 def get_db_file_dir_path(logs_dir: str) -> str:
@@ -303,4 +304,3 @@ class FireXRunDbManager:
 
     def close(self):
         self.db_conn.close()
-
