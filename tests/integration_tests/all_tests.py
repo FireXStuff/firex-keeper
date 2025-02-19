@@ -8,8 +8,8 @@ from firexapp.common import wait_until
 from firexkit.task import FireXTask
 
 from firex_keeper import task_query
-from firex_keeper.persist import get_db_manager, task_by_uuid_exp, task_by_name_exp
-from firexapp.tasks.root_tasks import RootTask
+from firex_keeper.persist import get_db_manager, task_by_uuid_exp
+
 
 @app.task()
 def echo(arg_echo):
@@ -30,7 +30,6 @@ class KeepNoopData(FlowTestConfiguration):
         assert tasks[0].state == RunStates.SUCCEEDED.value
 
         firex_id = os.path.basename(logs_dir)
-        # check DB internal complete flag (distinct from external keeper complete file)
         with get_db_manager(logs_dir) as db_manager:
             run_metadata = db_manager.query_run_metadata(firex_id)
             is_complete = wait_until(db_manager._is_keeper_complete, timeout=5, sleep_for=0.5)
@@ -76,12 +75,6 @@ class CompleteTest(FlowTestConfiguration):
 
     def assert_expected_firex_output(self, cmd_output, cmd_err):
         logs_dir = get_log_dir_from_output(cmd_output)
-
-        # query while run is in progress
-        running_tasks = task_query.all_tasks(
-            logs_dir, wait_for_exp_exist=task_by_name_exp(RootTask.__name__))
-        assert len(running_tasks) > 0, f"Found no keeper tasks: {running_tasks}"
-
         keeper_complete = task_query.wait_on_keeper_complete(logs_dir)
         assert keeper_complete, "Keeper database is not complete."
 

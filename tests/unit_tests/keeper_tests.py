@@ -183,7 +183,6 @@ class FireXKeeperTests(unittest.TestCase):
             _write_events_to_db(logs_dir, tree_events)
 
             tree = task_query._create_task_tree(logs_dir)
-            assert tree
             causing_task = task_query.find_task_causing_chain_exception(tree)
             self.assertEqual('4', causing_task.uuid)
 
@@ -334,7 +333,7 @@ class FireXKeeperTests(unittest.TestCase):
 
     def test_write_retry_success(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
-            db_writer = WritingFireXRunDbManager(_create_run_metadata(tmpdirname))
+            db_writer = WritingFireXRunDbManager(tmpdirname, 'FireX-1')
             unmocked_insert_task = db_writer.insert_task
             with patch.object(db_writer, 'insert_task', wraps=db_writer.insert_task) as mock_insert:
                 # fail three, then succeed, relying on retries.
@@ -351,7 +350,7 @@ class FireXKeeperTests(unittest.TestCase):
 
     def test_write_retry_success_sqlliteoperationalerror(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
-            db_writer = WritingFireXRunDbManager(_create_run_metadata(tmpdirname))
+            db_writer = WritingFireXRunDbManager(tmpdirname, 'FireX-1')
             unmocked_insert_task = db_writer.insert_task
             with patch.object(db_writer, 'insert_task', wraps=db_writer.insert_task) as mock_insert:
                 # fail three, then succeed, relying on retries.
@@ -368,7 +367,7 @@ class FireXKeeperTests(unittest.TestCase):
 
     def test_write_retry_fail(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
-            db_writer = WritingFireXRunDbManager(_create_run_metadata(tmpdirname))
+            db_writer = WritingFireXRunDbManager(tmpdirname, 'FireX-1')
             with patch.object(db_writer, 'insert_task') as mock_insert:
                 # fail more times than we'll retry for.
                 mock_insert.side_effect = [
@@ -382,7 +381,7 @@ class FireXKeeperTests(unittest.TestCase):
 
     def test_write_retry_fail_sqlliteoperationalerror(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
-            db_writer = WritingFireXRunDbManager(_create_run_metadata(tmpdirname))
+            db_writer = WritingFireXRunDbManager(tmpdirname, 'FireX-1')
             with patch.object(db_writer, 'insert_task') as mock_insert:
                 # fail more times than we'll retry for.
                 mock_insert.side_effect = [
@@ -392,9 +391,3 @@ class FireXKeeperTests(unittest.TestCase):
                 db_writer.aggregate_events_and_update_db([{'uuid': '1', 'name': 'Noop'}])
                 self.assertEqual(mock_insert.call_count, DEFAULT_MAX_RETRY_ATTEMPTS)
                 self.assertEqual(db_writer.query_tasks(True), [])
-
-
-def _create_run_metadata(logs_dir) -> FireXRunMetadata:
-    return FireXRunMetadata(
-        'FireX-1', logs_dir, 'FakeService', None, None,
-    )
