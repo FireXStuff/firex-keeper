@@ -16,8 +16,9 @@ setup(name='firex_keeper',
       zip_safe=True,
       install_requires=[
             'firexapp',
-            'SQLAlchemy<2',
-
+            'SQLAlchemy==2.0.38',
+            'pysqlite3',
+            'pysqlite3-binary',
       ],
       entry_points={
           'console_scripts': [

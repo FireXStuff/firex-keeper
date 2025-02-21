@@ -19,6 +19,7 @@ firex_run_metadata = Table(
     Column(RunMetadataColumn.CHAIN.value, String(70), nullable=False),
     Column(RunMetadataColumn.ROOT_UUID.value, String(UUID_LEN), nullable=True),
     Column('keeper_complete', Boolean, default=False),
+    Column(RunMetadataColumn.FIREX_REQUESTER.value, String(20), default=None, nullable=True),
 )
 
 COLS_TO_SQLALCHEMY_CONFIG = {

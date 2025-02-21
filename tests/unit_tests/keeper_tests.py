@@ -333,7 +333,7 @@ class FireXKeeperTests(unittest.TestCase):
 
     def test_write_retry_success(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
-            db_writer = WritingFireXRunDbManager(tmpdirname, 'FireX-1')
+            db_writer = _create_test_runmetadata(tmpdirname)
             unmocked_insert_task = db_writer.insert_task
             with patch.object(db_writer, 'insert_task', wraps=db_writer.insert_task) as mock_insert:
                 # fail three, then succeed, relying on retries.
@@ -350,7 +350,7 @@ class FireXKeeperTests(unittest.TestCase):
 
     def test_write_retry_success_sqlliteoperationalerror(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
-            db_writer = WritingFireXRunDbManager(tmpdirname, 'FireX-1')
+            db_writer = _create_test_runmetadata(tmpdirname)
             unmocked_insert_task = db_writer.insert_task
             with patch.object(db_writer, 'insert_task', wraps=db_writer.insert_task) as mock_insert:
                 # fail three, then succeed, relying on retries.
@@ -367,7 +367,7 @@ class FireXKeeperTests(unittest.TestCase):
 
     def test_write_retry_fail(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
-            db_writer = WritingFireXRunDbManager(tmpdirname, 'FireX-1')
+            db_writer = _create_test_runmetadata(tmpdirname)
             with patch.object(db_writer, 'insert_task') as mock_insert:
                 # fail more times than we'll retry for.
                 mock_insert.side_effect = [
@@ -376,12 +376,12 @@ class FireXKeeperTests(unittest.TestCase):
                 ]
                 db_writer.aggregate_events_and_update_db([{'uuid': '1', 'name': 'Noop'}])
                 self.assertEqual(mock_insert.call_count, DEFAULT_MAX_RETRY_ATTEMPTS)
-                self.assertEqual(db_writer.query_tasks(True), [])
+                self.assertEqual(db_writer.db_mgr.query_tasks(True), [])
 
 
     def test_write_retry_fail_sqlliteoperationalerror(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
-            db_writer = WritingFireXRunDbManager(tmpdirname, 'FireX-1')
+            db_writer = _create_test_runmetadata(tmpdirname)
             with patch.object(db_writer, 'insert_task') as mock_insert:
                 # fail more times than we'll retry for.
                 mock_insert.side_effect = [
@@ -390,4 +390,7 @@ class FireXKeeperTests(unittest.TestCase):
                 ]
                 db_writer.aggregate_events_and_update_db([{'uuid': '1', 'name': 'Noop'}])
                 self.assertEqual(mock_insert.call_count, DEFAULT_MAX_RETRY_ATTEMPTS)
-                self.assertEqual(db_writer.query_tasks(True), [])
+                self.assertEqual(db_writer.db_mgr.query_tasks(True), [])
+
+def _create_test_runmetadata(log_dir) ->WritingFireXRunDbManager:
+    return WritingFireXRunDbManager(FireXRunMetadata('FireX-1', log_dir, 'SomeChain', None, None))
