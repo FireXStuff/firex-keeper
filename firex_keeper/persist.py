@@ -1,12 +1,11 @@
 import json
 import logging
 import os
-from typing import List
 from contextlib import contextmanager
 from time import perf_counter, sleep
 
 from firexapp.submit.uid import Uid
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
 from sqlalchemy.sql import select, and_
 from sqlalchemy.sql.selectable import Select
 from sqlalchemy.exc import OperationalError

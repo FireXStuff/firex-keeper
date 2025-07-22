@@ -333,7 +333,7 @@ class FireXKeeperTests(unittest.TestCase):
 
     def test_write_retry_success(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
-            db_writer = WritingFireXRunDbManager(tmpdirname, 'FireX-1')
+            db_writer = _create_writing_db_mgr(tmpdirname)
             unmocked_insert_task = db_writer.insert_task
             with patch.object(db_writer, 'insert_task', wraps=db_writer.insert_task) as mock_insert:
                 # fail three, then succeed, relying on retries.
@@ -350,7 +350,7 @@ class FireXKeeperTests(unittest.TestCase):
 
     def test_write_retry_success_sqlliteoperationalerror(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
-            db_writer = WritingFireXRunDbManager(tmpdirname, 'FireX-1')
+            db_writer = _create_writing_db_mgr(tmpdirname)
             unmocked_insert_task = db_writer.insert_task
             with patch.object(db_writer, 'insert_task', wraps=db_writer.insert_task) as mock_insert:
                 # fail three, then succeed, relying on retries.
@@ -367,7 +367,7 @@ class FireXKeeperTests(unittest.TestCase):
 
     def test_write_retry_fail(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
-            db_writer = WritingFireXRunDbManager(tmpdirname, 'FireX-1')
+            db_writer = _create_writing_db_mgr(tmpdirname)
             with patch.object(db_writer, 'insert_task') as mock_insert:
                 # fail more times than we'll retry for.
                 mock_insert.side_effect = [
@@ -381,7 +381,7 @@ class FireXKeeperTests(unittest.TestCase):
 
     def test_write_retry_fail_sqlliteoperationalerror(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
-            db_writer = WritingFireXRunDbManager(tmpdirname, 'FireX-1')
+            db_writer = _create_writing_db_mgr(tmpdirname)
             with patch.object(db_writer, 'insert_task') as mock_insert:
                 # fail more times than we'll retry for.
                 mock_insert.side_effect = [
@@ -391,3 +391,14 @@ class FireXKeeperTests(unittest.TestCase):
                 db_writer.aggregate_events_and_update_db([{'uuid': '1', 'name': 'Noop'}])
                 self.assertEqual(mock_insert.call_count, DEFAULT_MAX_RETRY_ATTEMPTS)
                 self.assertEqual(db_writer.query_tasks(True), [])
+
+
+def _create_writing_db_mgr(logs_dir: str) -> WritingFireXRunDbManager:
+    return WritingFireXRunDbManager(
+        FireXRunMetadata(
+            'FireX-1',
+            logs_dir,
+            'SomeChain',
+            None,
+            'username'
+        ))

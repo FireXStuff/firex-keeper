@@ -5,8 +5,7 @@ from tempfile import TemporaryDirectory
 import shutil
 import subprocess
 
-from firexapp.events.model import TaskColumn, RunStates, FireXTask, is_chain_exception, get_chain_exception_child_uuid, \
-    INCOMPLETE_RUNSTATES
+from firexapp.events.model import TaskColumn, RunStates, FireXTask, is_chain_exception, get_chain_exception_child_uuid
 from firex_keeper.db_model import firex_tasks
 from firex_keeper.persist import get_db_manager, task_by_uuid_exp, get_keeper_complete_file_path, \
     get_db_file, get_keeper_query_ready_file_path
@@ -17,6 +16,13 @@ from sqlalchemy import literal
 
 logger = logging.getLogger(__name__)
 
+
+INCOMPLETE_RUNSTATES = {
+    s.to_celery_event_type() for s in RunStates if not s.is_complete()
+}
+REVOKED_RUNSTATES = {
+    s.to_celery_event_type() for s in [RunStates.REVOKED, RunStates.REVOKE_COMPLETED]
+}
 
 class FireXTaskQueryException(Exception):
     pass
@@ -58,7 +64,11 @@ def all_tasks(logs_dir, **kwargs) -> List[FireXTask]:
 
 
 def tasks_by_name(logs_dir, name, **kwargs) -> List[FireXTask]:
-    return _query_tasks(logs_dir, _task_col_eq(TaskColumn.NAME, name), **kwargs)
+    if '.' in name:
+        col = TaskColumn.LONG_NAME
+    else:
+        col = TaskColumn.NAME
+    return _query_tasks(logs_dir, _task_col_eq(col, name), **kwargs)
 
 
 def single_task_by_name(logs_dir, name, **kwargs) -> FireXTask:
@@ -80,7 +90,7 @@ def task_by_uuid(logs_dir, uuid, wait_for_exp_exist=None, max_wait=3, **kwargs) 
         **kwargs)
 
     if not tasks:
-        raise FireXTaskQueryException("Found no task with UUID %s" % uuid)
+        raise FireXTaskQueryException(f"Found no task with UUID {uuid}")
     return tasks[0]
 
 
@@ -99,7 +109,10 @@ def failed_tasks(logs_dir, **kwargs) -> List[FireXTask]:
 
 
 def revoked_tasks(logs_dir, **kwargs) -> List[FireXTask]:
-    return _query_tasks(logs_dir, _task_col_eq(TaskColumn.STATE, RunStates.REVOKED.value), **kwargs)
+    return _query_tasks(
+        logs_dir,
+        firex_tasks.c[TaskColumn.STATE.value].in_(REVOKED_RUNSTATES),
+        **kwargs)
 
 
 def running_tasks(logs_dir, **kwargs) -> List[FireXTask]:
