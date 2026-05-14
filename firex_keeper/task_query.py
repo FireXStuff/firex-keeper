@@ -38,6 +38,54 @@ def _wait_and_query(logs_dir, query, db_file_query_ready_timeout, **kwargs) -> L
         return db_manager.query_tasks(query, **kwargs)
 
 
+def _unlink_if_exists(path: str) -> None:
+    try:
+        if os.path.isfile(path):
+            os.unlink(path)
+    except OSError:
+        pass
+
+
+def _copy_keeper_db_for_local_query(existing_db_file: str, new_tmp_db_file: str, tmp_cwd: str) -> None:
+    """Copy keeper SQLite to a temp path for local reads.
+    try rsync (good over NFS / cross-geo), then sqlite3 .backup (consistent snapshot),
+    then shutil.copyfile.
+    """
+    rsync_bin = shutil.which('rsync')
+    if rsync_bin:
+        try:
+            subprocess.check_output(
+                [rsync_bin, existing_db_file, new_tmp_db_file],
+                cwd=tmp_cwd,
+            )
+            if os.path.isfile(new_tmp_db_file) and os.path.getsize(new_tmp_db_file) > 0:
+                logger.info('Copied keeper DB for local query using rsync')
+                return
+            logger.warning(
+                'rsync keeper copy succeeded but dest missing or empty: %s',
+                new_tmp_db_file,
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            logger.warning('rsync keeper copy failed: %s', e)
+        _unlink_if_exists(new_tmp_db_file)
+
+    sqlite_bin = '/bin/sqlite3'
+    if os.path.isfile(sqlite_bin):
+        try:
+            subprocess.check_output(
+                [sqlite_bin, existing_db_file, f'.backup {new_tmp_db_file}'],
+                cwd=tmp_cwd,
+            )
+            logger.info('Copied keeper DB for local query using sqlite3 .backup')
+            return
+        except (OSError, subprocess.SubprocessError) as e:
+            logger.warning('sqlite3 .backup keeper copy failed: %s', e)
+        _unlink_if_exists(new_tmp_db_file)
+
+    shutil.copyfile(existing_db_file, new_tmp_db_file)
+    logger.info('Copied keeper DB for local query using shutil.copyfile')
+
+
 def _query_tasks(logs_dir, query, db_file_query_ready_timeout=15, copy_before_query=False, **kwargs) -> List[FireXTask]:
     if copy_before_query:
         tmp_base_dir = '/dev/shm' if os.path.isdir('/dev/shm') else None
@@ -45,13 +93,7 @@ def _query_tasks(logs_dir, query, db_file_query_ready_timeout=15, copy_before_qu
             existing_db_file = get_db_file(logs_dir, new=False)
             new_tmp_db_file = get_db_file(temp_log_dir, new=True)
 
-            sqlite_bin = '/bin/sqlite3'
-            if os.path.isfile(sqlite_bin):
-                subprocess.check_output(
-                    [sqlite_bin, existing_db_file, f'.backup {new_tmp_db_file}'],
-                    cwd=temp_log_dir)
-            else:
-                shutil.copyfile(existing_db_file, new_tmp_db_file)
+            _copy_keeper_db_for_local_query(existing_db_file, new_tmp_db_file, temp_log_dir)
 
             query_results = _wait_and_query(temp_log_dir, query, db_file_query_ready_timeout, **kwargs)
     else:
