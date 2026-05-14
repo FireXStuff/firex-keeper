@@ -5,6 +5,7 @@ from firexapp.submit.submit import get_log_dir_from_output
 from firexapp.testing.config_base import FlowTestConfiguration, assert_is_good_run, assert_is_bad_run
 from firexapp.events.model import RunStates
 from firexapp.common import wait_until
+from firexkit.chain import returns
 from firexkit.task import FireXTask
 
 from firex_keeper import task_query
@@ -12,6 +13,7 @@ from firex_keeper.persist import get_db_manager, task_by_uuid_exp
 
 
 @app.task()
+@returns('echoed')
 def echo(arg_echo):
     return arg_echo
 
